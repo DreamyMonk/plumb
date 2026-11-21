@@ -250,7 +250,7 @@ export default function ChatPage() {
             ) : (
               <div className="pt-16">
                 <h1 className="text-[22px] font-semibold tracking-tight">What do you want to know?</h1>
-                <p className="text-ink-2 mt-1">Claude writes SQL against your tables, charts the results and checks its numbers. Questions, query results and sample rows are sent to the Anthropic API, with names, emails, phone numbers and other personal data replaced by tokens first.</p>
+                <p className="text-ink-2 mt-1">The AI writes SQL against your tables, charts the results and checks its numbers. Questions, query results and sample rows are sent to an outside AI service, with names, emails, phone numbers and other personal data replaced by tokens first.</p>
                 <div className="mt-5 grid sm:grid-cols-2 gap-2">
                   {starters(focused).map((prompt) => (
                     <button key={prompt} type="button" onClick={() => void send(prompt)} className="text-left rounded-xl border border-line bg-surface p-3 text-[13.5px] hover:border-ink-3 transition-colors cursor-pointer">{prompt}</button>

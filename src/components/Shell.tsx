@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Database, FileSpreadsheet, KeyRound, LayoutDashboard, MessageSquare, Moon, Radio, Sun, TrendingUp } from "lucide-react";
+import { CalendarClock, Database, FileSpreadsheet, KeyRound, LayoutDashboard, LogOut, MessageSquare, Moon, Radio, Sun, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -39,8 +39,25 @@ function ThemeToggle() {
   );
 }
 
+function LogoutButton() {
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  };
+  return (
+    <button type="button" onClick={() => void logout()} aria-label="Log out" title="Log out" className="p-1.5 rounded-md text-ink-3 hover:text-ink hover:bg-surface-2 cursor-pointer">
+      <LogOut size={15} />
+    </button>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  if (pathname === "/login") return <>{children}</>;
+  return <AppShell pathname={pathname}>{children}</AppShell>;
+}
+
+function AppShell({ children, pathname }: { children: ReactNode; pathname: string }) {
   const { data: status } = useApi<Status>("/api/status");
   const { data: datasets, refresh } = useApi<Dataset[]>("/api/datasets");
 
@@ -108,10 +125,11 @@ export function Shell({ children }: { children: ReactNode }) {
               <KeyRound size={13} aria-hidden /> <span className="max-md:hidden">No API key</span>
             </span>
           ) : (
-            <span className="text-[11.5px] text-ink-3 truncate max-md:hidden">{status ? "Claude Sonnet 5.5" : ""}</span>
+            <span className="text-[11.5px] text-ink-3 truncate max-md:hidden">{status ? "AI ready" : ""}</span>
           )}
-          <span className="ml-auto">
+          <span className="ml-auto flex items-center">
             <ThemeToggle />
+            <LogoutButton />
           </span>
         </div>
       </aside>

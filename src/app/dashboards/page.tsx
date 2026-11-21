@@ -31,7 +31,7 @@ export default function DashboardsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-8 py-8">
-      <PageHeader title="Dashboards" subtitle="Claude picks the measures and charts from your data, runs every query, then writes insights from the real results." />
+      <PageHeader title="Dashboards" subtitle="The AI picks the measures and charts from your data, runs every query, then writes insights from the real results." />
       {loadError ? <Note tone="bad">{loadError}</Note> : null}
       {!datasets ? <Spinner /> : datasets.length === 0 ? (
         <Card><Empty title="No data yet" action={<Link href="/"><Button variant="primary">Add data</Button></Link>}>Add a table to build a dashboard from it.</Empty></Card>

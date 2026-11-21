@@ -276,7 +276,6 @@ export type ChatEvent =
 
 export interface Status {
   aiConfigured: boolean;
-  model: string;
   dataDir: string;
 }
 

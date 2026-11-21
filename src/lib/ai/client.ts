@@ -31,36 +31,36 @@ export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 export function aiErrorMessage(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) {
-    return "Claude rejected the API key. Check ANTHROPIC_API_KEY in .env.local and restart the app.";
+    return "The AI service rejected the API key. Check ANTHROPIC_API_KEY in .env.local and restart the app.";
   }
   if (error instanceof Anthropic.PermissionDeniedError) {
-    return "This API key does not have access to Claude Sonnet 5.5.";
+    return "This API key does not have access to the AI model Plumb uses.";
   }
   if (error instanceof Anthropic.NotFoundError) {
-    return "Claude Sonnet 5.5 was not found for this account.";
+    return "The AI model Plumb uses isn't available for this account.";
   }
   if (error instanceof Anthropic.RateLimitError) {
-    return "Claude's rate limit was reached. Wait a moment and try again.";
+    return "The AI service's rate limit was reached. Wait a moment and try again.";
   }
   if (error instanceof Anthropic.BadRequestError) {
-    return `Claude could not process this request: ${error.message}`;
+    return `The AI service could not process this request: ${error.message}`;
   }
   if (error instanceof Anthropic.APIConnectionError) {
-    return "Could not reach Claude. Check your internet connection.";
+    return "Could not reach the AI service. Check your internet connection.";
   }
   if (error instanceof Anthropic.APIError) {
-    return `Claude returned an error (${error.status ?? "unknown"}). Try again in a moment.`;
+    return `The AI service returned an error (${error.status ?? "unknown"}). Try again in a moment.`;
   }
   const message = error instanceof Error ? error.message : String(error);
   if (/authentication method|apiKey|authToken/i.test(message)) {
-    return "No Claude credentials found. Add ANTHROPIC_API_KEY to .env.local (see .env.example) and restart the app.";
+    return "No AI credentials found. Add ANTHROPIC_API_KEY to .env.local (see .env.example) and restart the app.";
   }
   return message;
 }
 
 export class RefusalError extends Error {
   constructor(category?: string | null) {
-    super(`Claude declined this request${category ? ` (${category})` : ""}. Try rephrasing it.`);
+    super(`The AI declined this request${category ? ` (${category})` : ""}. Try rephrasing it.`);
   }
 }
 
@@ -94,7 +94,7 @@ export async function structured<T extends z.ZodType>({ system, prompt, schema, 
   );
   const message = await stream.finalMessage();
   assertUsable(message);
-  if (message.stop_reason === "max_tokens") throw new Error("Claude's response was cut off. Try fewer tables.");
+  if (message.stop_reason === "max_tokens") throw new Error("The AI's response was cut off. Try fewer tables.");
   const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
   return schema.parse(JSON.parse(text));
 }

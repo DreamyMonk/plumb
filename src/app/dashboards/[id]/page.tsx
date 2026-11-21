@@ -136,7 +136,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
 
       {dashboard.tables.length > 0 ? (
         <section className="mt-6 bg-surface border border-line rounded-xl p-4">
-          <label htmlFor="rebuild" className="block font-semibold">Rebuild with Claude</label>
+          <label htmlFor="rebuild" className="block font-semibold">Rebuild with AI</label>
           <p className="text-[12.5px] text-ink-2 mb-2">Creates a new layout from {dashboard.tables.join(", ")}. It replaces every widget here, including pinned ones.</p>
           <div className="flex gap-2">
             <input id="rebuild" className={inputClass} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="For example: focus on returns by category" />

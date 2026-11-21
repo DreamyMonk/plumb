@@ -143,7 +143,7 @@ export async function runChatTurn(chat: StoredChat, text: string, emit: (event: 
     }
     const calls = message.content.filter((block): block is BetaToolUseBlock => block.type === "tool_use");
     if (calls.length > 0 && message.stop_reason === "max_tokens") {
-      throw new Error("Claude's response was cut off before a tool call finished. Try a narrower question.");
+      throw new Error("The AI's response was cut off before a tool call finished. Try a narrower question.");
     }
     messages.push({ role: "assistant", content: message.content });
     if (calls.length === 0) {

@@ -54,7 +54,7 @@ function Explanation({ query, result }: { query: Query; result: PeriodExplanatio
           ) : null}
         </div>
         <Link href={`/chat?table=${query.table}&q=${encodeURIComponent(ask)}`}>
-          <Button size="sm"><MessageSquare size={13} /> Ask Claude</Button>
+          <Button size="sm"><MessageSquare size={13} /> Ask AI</Button>
         </Link>
       </div>
       {result.events.length ? (

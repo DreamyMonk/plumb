@@ -90,7 +90,7 @@ function SuggestionRow({ suggestion, onApply, disabled }: { suggestion: Suggesti
     <li className="py-2.5 flex items-start gap-3">
       <div className="min-w-0 flex-1">
         <p className="font-medium flex items-center gap-1.5">
-          {suggestion.source === "ai" ? <Sparkles size={13} className="text-accent shrink-0" aria-label="Suggested by Claude" /> : null}
+          {suggestion.source === "ai" ? <Sparkles size={13} className="text-accent shrink-0" aria-label="Suggested by AI" /> : null}
           {suggestion.title}
         </p>
         <p className="text-[12.5px] text-ink-2">{suggestion.reason}</p>
@@ -132,7 +132,7 @@ function CleaningTab({ dataset, onChange }: { dataset: Dataset; onChange: (next:
               <p className="text-[12.5px] text-ink-2">Judgment calls. Nothing changes until you apply it, and you can undo.</p>
             </div>
             <Button busy={busy === "ai"} onClick={() => void act("ai", () => post(`/api/datasets/${dataset.id}/suggest`))}>
-              <Wand2 size={14} /> Review with Claude
+              <Wand2 size={14} /> Review with AI
             </Button>
           </div>
           {dataset.description ? <p className="mt-3 text-[13px] text-ink-2 flex gap-1.5"><Sparkles size={13} className="mt-1 shrink-0 text-accent" aria-hidden />{dataset.description}</p> : null}
@@ -207,11 +207,11 @@ function PrivacyControl({ dataset, column, onChange }: { dataset: Dataset; colum
   return (
     <div className="mt-2 flex items-center gap-2 text-[12px]">
       {kind ? (
-        <span className="flex items-center gap-1 text-good" title="Claude sees tokens instead of these values">
-          <ShieldCheck size={13} aria-hidden /> Masked for Claude · {PII_LABEL[kind]}
+        <span className="flex items-center gap-1 text-good" title="The AI sees tokens instead of these values">
+          <ShieldCheck size={13} aria-hidden /> Masked for AI · {PII_LABEL[kind]}
         </span>
       ) : (
-        <span className="text-ink-3">{override === "allow" ? "Sent to Claude as is (your choice)" : "Sent to Claude as is"}</span>
+        <span className="text-ink-3">{override === "allow" ? "Sent to AI as is (your choice)" : "Sent to AI as is"}</span>
       )}
       <button type="button" disabled={busy} onClick={() => void set(next)} className="ml-auto text-accent underline cursor-pointer disabled:opacity-50">
         {kind ? "Send as is" : "Mask"}
