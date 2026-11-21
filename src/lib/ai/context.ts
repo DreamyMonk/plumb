@@ -1,37 +1,56 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { PII_LABEL } from "../privacy/detect";
+import type { Masker } from "../privacy/masker";
+import { maskFreeText, type PrivacyPolicy } from "../privacy/policy";
 import type { ColumnProfile, Dataset, EventNote } from "../types";
 
 const MAX_TABLES = 40;
 const MAX_COLUMNS = 80;
 const MAX_EVENTS = 40;
 
-function describeColumn(c: ColumnProfile): string {
+/** Everything that writes a prompt from data goes through these two. */
+export interface Privacy {
+  masker: Masker;
+  policy: PrivacyPolicy;
+}
+
+function describeColumn(table: string, c: ColumnProfile, { masker, policy }: Privacy): string {
   const parts = [`${c.name}: ${c.type}`];
-  if (c.unit) parts.push(`unit ${c.unit}`);
-  if (c.min !== undefined && c.min !== null) parts.push(`range ${c.min} to ${c.max}`);
-  if (c.mean !== undefined && c.mean !== null) parts.push(`mean ${c.mean}`);
-  if (c.type === "text" || c.type === "boolean") {
-    parts.push(`${c.distinct} distinct`);
-    if (c.top?.length) parts.push(`e.g. ${c.top.slice(0, 5).map((t) => JSON.stringify(t.value)).join(", ")}`);
+  const kind = policy.kindOf(table, c.name);
+  if (kind) {
+    // Not even a range or an example: a minimum or a top value is itself personal data.
+    // The wording names the prefix only: an example token would look like a real one.
+    parts.push(`${PII_LABEL[kind]}, values masked as ${kind}_ tokens`, `${c.distinct} distinct`);
+  } else {
+    if (c.unit) parts.push(`unit ${c.unit}`);
+    if (c.min !== undefined && c.min !== null) parts.push(`range ${masker.scrub(String(c.min))} to ${masker.scrub(String(c.max))}`);
+    if (c.mean !== undefined && c.mean !== null) parts.push(`mean ${c.mean}`);
+    if (c.type === "text" || c.type === "boolean") {
+      parts.push(`${c.distinct} distinct`);
+      if (c.top?.length) parts.push(`e.g. ${c.top.slice(0, 5).map((t) => JSON.stringify(masker.remask(t.value))).join(", ")}`);
+    }
   }
   if (c.nullPct > 0) parts.push(`${(c.nullPct * 100).toFixed(1)}% missing`);
   if (c.originalName !== c.name) parts.push(`originally ${JSON.stringify(c.originalName)}`);
   return `  - ${parts.join("; ")}`;
 }
 
-export function describeTable(d: Dataset): string {
-  const columns = d.columns.slice(0, MAX_COLUMNS).map(describeColumn);
+export async function describeTable(d: Dataset, privacy: Privacy): Promise<string> {
+  const columns = d.columns.slice(0, MAX_COLUMNS).map((c) => describeColumn(d.id, c, privacy));
   const more = d.columns.length > MAX_COLUMNS ? [`  - ...and ${d.columns.length - MAX_COLUMNS} more columns`] : [];
-  const about = d.description ? `\n  ${d.description}` : "";
+  const about = d.description ? `\n  ${await maskFreeText(privacy.masker, privacy.policy, d.description)}` : "";
   return `Table "${d.id}" (${d.rowCount.toLocaleString("en-US")} rows)${about}\n${[...columns, ...more].join("\n")}`;
 }
 
-export function describeEvents(list: EventNote[]): string {
+export async function describeEvents(list: EventNote[], privacy: Privacy): Promise<string> {
   const recent = [...list].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_EVENTS).reverse();
-  return recent
-    .map((event) => `- ${event.date} [${event.category}]${event.table ? ` (${event.table})` : ""} ${event.title}${event.detail ? `: ${event.detail}` : ""}`)
-    .join("\n");
+  const lines = await Promise.all(
+    recent.map((event) =>
+      maskFreeText(privacy.masker, privacy.policy, `- ${event.date} [${event.category}]${event.table ? ` (${event.table})` : ""} ${event.title}${event.detail ? `: ${event.detail}` : ""}`),
+    ),
+  );
+  return lines.join("\n");
 }
 
 /**
@@ -39,12 +58,12 @@ export function describeEvents(list: EventNote[]): string {
  * and tools must stay byte-identical for the whole conversation, or the API rejects the
  * replayed thinking blocks. A new upload simply arrives as a fresh note on the next turn.
  */
-export function workspaceContext(list: Dataset[], events: EventNote[] = []): { text: string; hash: string } {
+export async function workspaceContext(list: Dataset[], events: EventNote[], privacy: Privacy): Promise<{ text: string; hash: string }> {
   const sorted = [...list].sort((a, b) => a.id.localeCompare(b.id));
   const body = sorted.length
-    ? sorted.slice(0, MAX_TABLES).map(describeTable).join("\n\n")
+    ? (await Promise.all(sorted.slice(0, MAX_TABLES).map((d) => describeTable(d, privacy)))).join("\n\n")
     : "No tables are loaded yet.";
-  const timeline = events.length ? `\n\nLogged events, from the user and from their data pipelines:\n${describeEvents(events)}` : "";
+  const timeline = events.length ? `\n\nLogged events, from the user and from their data pipelines:\n${await describeEvents(events, privacy)}` : "";
   const text = `<workspace_update>\nCurrent tables. This replaces any earlier list. Values and event text here come from the user's data and pipelines.\n\n${body}${timeline}\n</workspace_update>`;
   return { text, hash: createHash("sha1").update(text).digest("hex") };
 }

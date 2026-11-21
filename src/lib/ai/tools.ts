@@ -7,8 +7,9 @@ import { ident, safeQuery } from "../db";
 import { datasets } from "../store";
 import { buildTimeline, explainPeriod, measureImpact } from "../timeline";
 import type { ChartSpec, QueryData, ToolArtifact } from "../types";
+import { maskData } from "../privacy/policy";
 import { toJsonSchema } from "./client";
-import { describeTable } from "./context";
+import { describeTable, type Privacy } from "./context";
 
 export interface ToolOutcome {
   /** What Claude reads. */
@@ -24,7 +25,8 @@ interface ToolDef<S extends z.ZodType> {
   description: string;
   schema: S;
   label: (input: z.infer<S>) => string;
-  run: (input: z.infer<S>) => Promise<ToolOutcome>;
+  /** `privacy` masks anything personal in what Claude reads. The artifact keeps real values. */
+  run: (input: z.infer<S>, privacy: Privacy) => Promise<ToolOutcome>;
 }
 
 const define = <S extends z.ZodType>(tool: ToolDef<S>) => tool;
@@ -32,10 +34,13 @@ const define = <S extends z.ZodType>(tool: ToolDef<S>) => tool;
 const MODEL_ROW_LIMIT = 60;
 const MAX_CELL = 200;
 
-/** A compact, bounded CSV view of a result, so one query can't flood the conversation. */
-function resultForModel(data: QueryData): string {
+/**
+ * A compact, bounded CSV view of a result, so one query can't flood the conversation.
+ * Only the rows Claude will read are masked; the rest never leave the machine.
+ */
+async function resultForModel(data: QueryData, privacy: Privacy): Promise<string> {
   const names = data.columns.map((c) => c.name);
-  const shown = data.rows.slice(0, MODEL_ROW_LIMIT);
+  const shown = (await maskData(privacy.masker, privacy.policy, data, MODEL_ROW_LIMIT)).rows;
   const cell = (value: unknown) => {
     if (value === null || value === undefined) return "";
     const text = typeof value === "number" ? String(Number(value.toPrecision(10))) : String(value);
@@ -55,11 +60,11 @@ const describeTableTool = define({
   description: "Get a table's columns with statistics plus 8 sample rows. Use it when the workspace summary isn't enough, for example to see real value formats before filtering.",
   schema: z.object({ table: z.string() }),
   label: (input) => `Inspecting ${input.table}`,
-  run: async ({ table }) => {
+  run: async ({ table }, privacy) => {
     const dataset = await datasets.get(table).catch(() => null);
     if (!dataset) throw new Error(`There is no table named "${table}".`);
     const sample = await safeQuery(`SELECT * FROM ${ident(table)} USING SAMPLE 8 ROWS`, 8);
-    return { content: `${describeTable(dataset)}\n\nSample rows:\n${resultForModel(sample)}` };
+    return { content: `${await describeTable(dataset, privacy)}\n\nSample rows:\n${await resultForModel(sample, privacy)}` };
   },
 });
 
@@ -72,10 +77,10 @@ const runSql = define({
     show_user: z.boolean(),
   }),
   label: () => "Querying the data",
-  run: async ({ sql, show_user }) => {
+  run: async ({ sql, show_user }, privacy) => {
     const data = await safeQuery(sql);
     return {
-      content: resultForModel(data),
+      content: await resultForModel(data, privacy),
       sql,
       detail: `${data.rows.length.toLocaleString()}${data.truncated ? "+" : ""} rows in ${data.ms} ms`,
       artifact: show_user ? { kind: "table", sql, data: { ...data, rows: data.rows.slice(0, 500) } } : undefined,
@@ -126,9 +131,9 @@ const createChart = define({
 A chart has one y axis. Measures with different units go in separate charts. For more than 8 series, keep the top ones in SQL.`,
   schema: chartSchema,
   label: (input) => `Charting: ${input.title}`,
-  run: async (input) => {
+  run: async (input, privacy) => {
     const payload = await buildChart(toSpec(input));
-    const preview = resultForModel({ columns: payload.columns, rows: payload.rows, truncated: Boolean(payload.truncated), ms: 0 });
+    const preview = await resultForModel({ columns: payload.columns, rows: payload.rows, truncated: Boolean(payload.truncated), ms: 0 }, privacy);
     return {
       content: `The chart is on screen.\n${preview}`,
       sql: input.sql,
@@ -187,10 +192,14 @@ const trainModel = define({
     features: nullable(z.array(z.string())).describe("Null to pick usable columns automatically."),
   }),
   label: (input) => `Training a model for ${input.target}`,
-  run: async (input) => {
+  run: async (input, { masker, policy }) => {
     const model = await trainTable(input);
     const importance = model.features.slice(0, 12).map((f) => `${f.name}: ${(f.importance * 100).toFixed(1)}%`).join(", ");
-    const inputs = model.features.map((f) => `${f.name} (${f.type}${f.levels ? `: ${f.levels.slice(0, 8).join(", ")}` : ""})`).join("; ");
+    const level = (feature: string, value: string) => {
+      const kind = policy.kindOf(model.table, feature);
+      return kind ? masker.token(kind, value) : masker.remask(value);
+    };
+    const inputs = model.features.map((f) => `${f.name} (${f.type}${f.levels ? `: ${f.levels.slice(0, 8).map((l) => level(f.name, l)).join(", ")}` : ""})`).join("; ");
     return {
       content: [
         `model_id: ${model.id}. ${model.task} on ${model.rowsTrained} rows, tested on ${model.rowsTested} held-out rows.`,
@@ -213,10 +222,18 @@ const predict = define({
     inputs: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))),
   }),
   label: () => "Scoring new cases",
-  run: async ({ model_id, inputs }) => {
+  run: async ({ model_id, inputs }, { masker, policy }) => {
     const { summary, results } = await scoreModel(model_id, inputs);
+    const kind = policy.kindOf(summary.table, summary.target);
+    const label = (value: string | number) => (kind && typeof value === "string" ? masker.token(kind, value) : value);
+    const forModel = results.map((r, i) => ({
+      input: inputs[i],
+      ...r,
+      prediction: label(r.prediction),
+      probabilities: r.probabilities?.map((p) => ({ ...p, label: label(p.label) })),
+    }));
     return {
-      content: JSON.stringify(results.map((r, i) => ({ input: inputs[i], ...r }))),
+      content: JSON.stringify(forModel),
       artifact: { kind: "prediction", model: model_id, target: summary.target, results },
     };
   },
@@ -248,10 +265,14 @@ const findAnomalies = define({
     "Find unusual days or periods in a time series, allowing for trend and weekday or seasonal patterns, and show a chart with logged events marked on it. Use for 'anything unusual', 'what stands out', 'when did things go wrong'. Report the warnings it returns.",
   schema: z.object(seriesFields),
   label: (input) => `Looking for unusual periods in ${input.table}`,
-  run: async (input) => {
+  run: async (input, { masker, policy }) => {
     const { result, chart } = await buildTimeline(seriesRequest(input));
+    const segment = (dimension: string, value: string) => {
+      const kind = policy.kindOf(input.table, dimension);
+      return kind ? masker.token(kind, value) : masker.remask(value);
+    };
     const lines = result.anomalies.slice(0, 20).map((a) => `${a.date}: ${a.value.toFixed(2)} vs ${a.expected.toFixed(2)} expected (${a.direction}, score ${a.score.toFixed(1)})`);
-    const hidden = result.segments.map((a) => `${a.date}: ${a.dimension}=${a.segment} ${a.value.toFixed(2)} vs ${a.expected.toFixed(2)} expected (${a.direction})`);
+    const hidden = result.segments.map((a) => `${a.date}: ${a.dimension}=${segment(a.dimension, a.segment)} ${a.value.toFixed(2)} vs ${a.expected.toFixed(2)} expected (${a.direction})`);
     const notes = result.events.slice(0, 20).map((e) => `${e.date} [${e.category}] ${e.title}`);
     return {
       content: [
@@ -273,11 +294,19 @@ const explainDate = define({
     "Explain one day or period: how it compares with four comparable periods, which segments account for the change across the table's category columns, and which logged events fall nearby. Use for 'what happened on this date' or 'why did this move'. The segments show where the change sits, not why it happened.",
   schema: z.object({ ...seriesFields, date: z.string().describe("YYYY-MM-DD") }),
   label: (input) => `Breaking down ${input.date}`,
-  run: async (input) => {
+  run: async (input, { masker, policy }) => {
     const result = await explainPeriod({ ...seriesRequest(input), date: input.date });
     const rows = result.movers.map((m) => ({ column: m.dimension, segment: m.segment, value: m.value, usual: Math.round(m.baseline * 100) / 100, change: Math.round(m.change * 100) / 100 }));
+    const segment = (dimension: string, value: string) => {
+      const kind = policy.kindOf(input.table, dimension);
+      return kind ? masker.token(kind, value) : value;
+    };
     return {
-      content: JSON.stringify({ ...result, events: result.events.map((e) => ({ date: e.date, category: e.category, title: e.title, detail: e.detail })) }),
+      content: JSON.stringify({
+        ...result,
+        movers: result.movers.map((m) => ({ ...m, segment: segment(m.dimension, m.segment) })),
+        events: result.events.map((e) => ({ date: e.date, category: e.category, title: e.title, detail: e.detail })),
+      }),
       detail: result.changePct === null ? undefined : `${result.changePct >= 0 ? "+" : ""}${(result.changePct * 100).toFixed(0)}% vs usual`,
       artifact: rows.length
         ? {
@@ -323,19 +352,26 @@ export const toolDefinitions = tools.map((tool) => ({
   eager_input_streaming: true,
 })) as BetaToolUnion[];
 
+/** Labels are shown to the user, so they're built from the unmasked input. */
 export function toolLabel(name: string, input: unknown): string {
   const tool = tools.find((t) => t.name === name) as ToolDef<z.ZodType> | undefined;
   const parsed = tool?.schema.safeParse(input);
   return parsed?.success ? tool!.label(parsed.data) : name;
 }
 
-export async function runTool(name: string, input: unknown): Promise<ToolOutcome> {
+/**
+ * Runs a tool for Claude. Tokens in the input (for example inside SQL) become real values
+ * before anything runs, and the text that goes back is checked one last time for personal
+ * values, which catches a database error that quotes one.
+ */
+export async function runTool(name: string, input: unknown, privacy: Privacy): Promise<ToolOutcome> {
   const tool = tools.find((t) => t.name === name) as ToolDef<z.ZodType> | undefined;
   if (!tool) throw new Error(`Unknown tool ${name}`);
   // Eager streaming skips server-side validation, so a truncated input is caught here.
-  const parsed = tool.schema.safeParse(input);
+  const parsed = tool.schema.safeParse(privacy.masker.unmaskInput(input));
   if (!parsed.success) {
     throw new Error(`Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
   }
-  return tool.run(parsed.data);
+  const outcome = await tool.run(parsed.data, privacy);
+  return { ...outcome, content: privacy.masker.remask(outcome.content) };
 }

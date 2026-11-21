@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
-import { ident, query } from "../db";
+import { ident, safeQuery } from "../db";
+import { loadPolicy, maskData, newMasker } from "../privacy/policy";
 import { datasets, newId } from "../store";
 import type { Dataset, Suggestion, TransformOp } from "../types";
 import { structured } from "./client";
@@ -48,18 +49,23 @@ function toTransform(s: z.infer<typeof schema>["suggestions"][number]): Transfor
 }
 
 export async function aiSuggestions(dataset: Dataset, signal: AbortSignal): Promise<Dataset> {
-  const sample = await query(`SELECT * FROM ${ident(dataset.id)} USING SAMPLE 25 ROWS`);
+  const privacy = { masker: newMasker(), policy: await loadPolicy() };
+  const { masker, policy } = privacy;
+  const sample = await maskData(masker, policy, await safeQuery(`SELECT * FROM ${ident(dataset.id)} USING SAMPLE 25 ROWS`, 25));
+  // Personal columns are left out: their common values would be personal data.
   const tops = dataset.columns
-    .filter((c) => c.type === "text" && c.top?.length)
-    .map((c) => `${c.name}: ${JSON.stringify(c.top)}`)
+    .filter((c) => c.type === "text" && c.top?.length && !policy.kindOf(dataset.id, c.name))
+    .map((c) => `${c.name}: ${masker.remask(JSON.stringify(c.top))}`)
     .join("\n");
-  const result = await structured({
+  const masked = await structured({
     system: SYSTEM,
-    prompt: `${describeTable(dataset)}\n\nMost common values:\n${tops || "(none)"}\n\nSample rows:\n${JSON.stringify(sample).slice(0, 8000)}`,
+    prompt: `${await describeTable(dataset, privacy)}\n\nMost common values:\n${tops || "(none)"}\n\nSample rows:\n${JSON.stringify(sample.rows).slice(0, 8000)}`,
     schema,
     effort: "low",
     signal,
   });
+  // A fix written with tokens must apply to the real values.
+  const result = masker.unmaskInput(masked) as typeof masked;
 
   const columns = new Set(dataset.columns.map((c) => c.name));
   const ai: Suggestion[] = result.suggestions.flatMap((s) => {

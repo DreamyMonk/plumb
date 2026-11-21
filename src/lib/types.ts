@@ -81,6 +81,14 @@ export interface SourceInfo {
   sheet?: string;
 }
 
+export type PiiKind = "email" | "phone" | "name" | "address" | "postcode" | "govid" | "card" | "ip" | "dob" | "pii";
+
+export interface PiiDetection {
+  version: number;
+  /** Detected kind per column; null means checked and not personal. */
+  detected: Record<string, PiiKind | null>;
+}
+
 export interface Dataset {
   id: string; // DuckDB table name
   label: string;
@@ -93,6 +101,9 @@ export interface Dataset {
   report: CleanReport;
   steps: TransformOp[];
   suggestions: Suggestion[];
+  pii?: PiiDetection;
+  /** The user's per-column choice, which overrides detection. */
+  privacy?: Record<string, "mask" | "allow">;
 }
 
 export type ValueFormat = "number" | "currency" | "percent";

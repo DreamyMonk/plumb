@@ -11,7 +11,9 @@ import {
 } from "@duckdb/node-api";
 import type { ColumnInfo, QueryData, Row } from "./types";
 
-export const DATA_DIR = process.env.PLUMB_DATA_DIR ?? path.join(process.cwd(), ".data");
+// The marker stops the build from tracing (and reading) the live data folder, which
+// fails on Windows while the app has the database open.
+export const DATA_DIR = process.env.PLUMB_DATA_DIR ?? path.join(/* turbopackIgnore: true */ process.cwd(), ".data");
 
 const QUERY_TIMEOUT_MS = 30_000;
 export const MAX_QUERY_ROWS = 5_000;

@@ -64,8 +64,25 @@ Judgment calls, like filling missing values or removing outliers, are only sugge
 ## Data and privacy
 
 - Everything is stored in `.data/` in this folder. Delete it to reset.
-- Questions, table and column names, column statistics, sample rows and query results are sent to the Anthropic API when you use an AI feature. Forecasting, model training and automatic cleaning send nothing.
+- Importing, cleaning, forecasts, models and the Timeline's statistics run on this machine and send nothing anywhere.
+- Chat, data review and dashboard generation send table and column names, column statistics, small samples and query results to the Anthropic API. Personal data in them is masked first, as described below.
 - Database connection strings are used for one import and never saved.
+
+### How personal data is masked
+
+Before anything reaches Claude, Plumb replaces personal values with tokens such as `email_3fa91c` or `name_8b21d0`. A value always gets the same token, so Claude can still group, count and filter by it, but it never sees the value itself.
+
+- **Which columns.** A column counts as personal when its name says so (email, phone, name, address, postcode, card or account number, government ID, IP address, date of birth) or when most sampled values look like emails, phone numbers, card numbers that pass the card check digit, US social security numbers, IP addresses, or many distinct person names. The Columns tab on each table shows what was detected, and you can switch any column to masked or sent as is.
+- **Values in any column.** Text sent to Claude is also scanned for emails, phone numbers, card numbers, social security numbers and IP addresses, wherever they appear.
+- **Renamed columns.** If a query renames a personal column (`SELECT full_name AS who`), the values that come back are checked against your personal columns and masked anyway.
+- **Summaries.** Claude never sees the most common values, ranges or examples of a personal column.
+- **What you type.** Emails and phone numbers in your messages are masked, as are names that match a personal column.
+- **Swapping back.** When Claude writes SQL with a token, the real value is put back on your machine before the query runs, and tokens in Claude's answers are shown to you as the real values.
+- **Errors.** A database error that quotes a personal value is masked before Claude sees it.
+
+Tokens come from a keyed hash. The key is created once in `.data/privacy.key` and never leaves this machine, so a token can't be turned back into a value without it. Token-to-value pairs are saved with each chat in `.data`, on this machine only.
+
+**Limits.** Masking is automatic, so treat it as a strong safety net, not a guarantee. Free text such as a notes column can hold a name that matches no pattern and no personal column; mark such columns as masked yourself. Over-masking can happen too: a column named `name` is masked in every table, including product names. Use **Send as is** where that's safe.
 
 ## Safety
 
@@ -93,6 +110,7 @@ There is no login. The app listens on 127.0.0.1 only and rejects requests from o
 - Each HTTP request can carry up to 100,000 records or 50 MB.
 - A stream's first batch sets its column types. Numbers can later widen to decimals and dates to timestamps. A value that fits neither is blanked and counted on the Streams page.
 - Unusual-period detection needs at least 14 periods of history.
+- Claude can't reason about what a masked value means. For example, it can't tell which customers share a surname.
 - A short incident in a low-volume group can be missed. Automatic scans skip a drop that could plausibly be chance, so at around 6 rows a day a single empty day stays off the list. You can still look up that date yourself.
 
 ## Development

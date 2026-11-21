@@ -100,9 +100,18 @@ function retailOrders() {
   return lines.join("\n");
 }
 
+// Made-up people. Phone numbers use 555-01xx, which is reserved for fiction.
+const FIRST = ["Ada", "Grace", "Alan", "Linus", "Margaret", "Dennis", "Barbara", "Ken", "Radia", "Tim", "Katherine", "Guido", "Frances", "Vint", "Hedy", "Edsger", "Annie", "Bjarne", "Sophie", "Conan"];
+const LAST = ["Lovelace", "Hopper", "Turing", "Torvalds", "Hamilton", "Ritchie", "Liskov", "Thompson", "Perlman", "Berners", "Johnson", "Rossum", "Allen", "Cerf", "Lamarr", "Dijkstra", "Easley", "Stroustrup", "Wilson", "O'Brien"];
+
 function customers() {
-  const lines = [["Customer ID", "Signup Date", "Plan", "Monthly Spend", "Support Tickets", "Tenure Months", "Region", "NPS", "Churned"].join(",")];
+  const lines = [["Customer ID", "Full Name", "Email", "Phone", "Signup Date", "Plan", "Monthly Spend", "Support Tickets", "Tenure Months", "Region", "NPS", "Churned"].join(",")];
   for (let i = 1; i <= 800; i++) {
+    const first = FIRST[i % FIRST.length];
+    const last = LAST[Math.floor(i / FIRST.length) % LAST.length];
+    const email = `${first}.${last.replace(/'/g, "")}${i}@example.com`.toLowerCase();
+    const area = ["212", "415", "312", "617", "206", "512", "303", "404", "702", "919"][Math.floor(i / 100) % 10];
+    const phone = `+1 (${area}) 555-01${String(i % 100).padStart(2, "0")}`;
     const plan = weighted([["Basic", 5], ["Plus", 3], ["Pro", 2]]);
     const spend = { Basic: 29, Plus: 79, Pro: 199 }[plan] * (1 + gaussian() * 0.08);
     const tenure = 1 + Math.floor(random() * 46);
@@ -114,6 +123,9 @@ function customers() {
     lines.push(
       [
         `C${String(i).padStart(4, "0")}`,
+        `${first} ${last}`,
+        email,
+        phone,
         messyDate(signup),
         random() < 0.05 ? plan.toUpperCase() : plan,
         random() < 0.03 ? "" : `$${spend.toFixed(2)}`,

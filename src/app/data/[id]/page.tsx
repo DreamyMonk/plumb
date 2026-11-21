@@ -1,12 +1,13 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Check, Download, LayoutDashboard, MessageSquare, RotateCcw, Sparkles, Trash2, TrendingUp, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Download, LayoutDashboard, MessageSquare, RotateCcw, ShieldCheck, Sparkles, Trash2, TrendingUp, Wand2 } from "lucide-react";
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Empty, inputClass, Note, PageHeader, Spinner, Tabs } from "@/components/ui";
 import { api, notifyDatasets, post, useApi } from "@/lib/client";
 import { compact } from "@/lib/format";
+import { effectiveKind, PII_LABEL } from "@/lib/privacy/detect";
 import type { CleanAction, ColumnProfile, Dataset, QualityScore, Row, Suggestion, TransformOp } from "@/lib/types";
 
 type Tab = "clean" | "columns" | "rows";
@@ -188,7 +189,38 @@ function MiniHistogram({ column }: { column: ColumnProfile }) {
   );
 }
 
-function ColumnCard({ column, rows }: { column: ColumnProfile; rows: number }) {
+function PrivacyControl({ dataset, column, onChange }: { dataset: Dataset; column: ColumnProfile; onChange: (next: Dataset) => void }) {
+  const kind = effectiveKind(dataset, column);
+  const override = dataset.privacy?.[column.name];
+  const [busy, setBusy] = useState(false);
+  const set = async (mode: "mask" | "allow" | "auto") => {
+    setBusy(true);
+    try {
+      onChange(await post<Dataset>(`/api/datasets/${dataset.id}/privacy`, { column: column.name, mode }));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const detected = dataset.pii?.detected[column.name] ?? null;
+  // Choosing what detection would do anyway just clears the override.
+  const next = kind ? (detected ? "allow" : "auto") : detected ? "auto" : "mask";
+  return (
+    <div className="mt-2 flex items-center gap-2 text-[12px]">
+      {kind ? (
+        <span className="flex items-center gap-1 text-good" title="Claude sees tokens instead of these values">
+          <ShieldCheck size={13} aria-hidden /> Masked for Claude · {PII_LABEL[kind]}
+        </span>
+      ) : (
+        <span className="text-ink-3">{override === "allow" ? "Sent to Claude as is (your choice)" : "Sent to Claude as is"}</span>
+      )}
+      <button type="button" disabled={busy} onClick={() => void set(next)} className="ml-auto text-accent underline cursor-pointer disabled:opacity-50">
+        {kind ? "Send as is" : "Mask"}
+      </button>
+    </div>
+  );
+}
+
+function ColumnCard({ column, rows, privacy }: { column: ColumnProfile; rows: number; privacy?: ReactNode }) {
   const stats: [string, string][] = [];
   if (typeof column.mean === "number") stats.push(["Mean", compact(column.mean)], ["Median", compact(column.median ?? 0)]);
   if (typeof column.min === "number") stats.push(["Min", compact(column.min)], ["Max", compact(Number(column.max))]);
@@ -216,6 +248,7 @@ function ColumnCard({ column, rows }: { column: ColumnProfile; rows: number }) {
           ))}
         </dl>
       ) : null}
+      {privacy}
       <MiniHistogram column={column} />
       {!column.histogram?.length && column.top?.length && column.distinct < rows * 0.9 ? (
         <ul className="mt-2 space-y-1">
@@ -351,7 +384,9 @@ export default function DatasetPage({ params }: { params: Promise<{ id: string }
       {tab === "clean" ? <CleaningTab dataset={dataset} onChange={(next) => { setData(next); notifyDatasets(); }} /> : null}
       {tab === "columns" ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {dataset.columns.map((column) => <ColumnCard key={column.name} column={column} rows={dataset.rowCount} />)}
+          {dataset.columns.map((column) => (
+            <ColumnCard key={column.name} column={column} rows={dataset.rowCount} privacy={<PrivacyControl dataset={dataset} column={column} onChange={setData} />} />
+          ))}
         </div>
       ) : null}
       {tab === "rows" ? <RowsTab dataset={dataset} /> : null}

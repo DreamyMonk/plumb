@@ -5,6 +5,7 @@ export function applyChatEvent(parts: UiPart[], event: ChatEvent): UiPart[] {
   const last = parts[parts.length - 1];
   switch (event.type) {
     case "text":
+      if (!event.delta) return parts;
       return last?.type === "text"
         ? [...parts.slice(0, -1), { type: "text", text: last.text + event.delta }]
         : [...parts, { type: "text", text: event.delta }];

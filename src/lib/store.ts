@@ -73,6 +73,8 @@ export interface StoredChat {
   contextHash?: string;
   /** Identifies the system prompt and tools this transcript was produced with. */
   transcriptVersion?: string;
+  /** Token to real value, so earlier tokens still resolve. Stays on this machine. */
+  masks?: Record<string, string>;
 }
 
 export interface StoredModel {
