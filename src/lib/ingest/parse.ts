@@ -73,13 +73,15 @@ function flatten(value: unknown, prefix: string, into: Record<string, unknown>, 
   }
 }
 
+export function flattenRecord(record: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  flatten(typeof record === "object" && record !== null ? record : { value: record }, "", out);
+  return out;
+}
+
 /** Builds a table from objects. Columns are the union of keys, in first-seen order. */
 export function objectsToRows(records: unknown[]): (string | null)[][] {
-  const flat = records.map((record) => {
-    const out: Record<string, unknown> = {};
-    flatten(typeof record === "object" && record !== null ? record : { value: record }, "", out);
-    return out;
-  });
+  const flat = records.map(flattenRecord);
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const record of flat) {

@@ -5,6 +5,7 @@ import { forecastTable, scoreModel, trainTable } from "../analytics";
 import { buildChart } from "../charts";
 import { ident, safeQuery } from "../db";
 import { datasets } from "../store";
+import { buildTimeline, explainPeriod, measureImpact } from "../timeline";
 import type { ChartSpec, QueryData, ToolArtifact } from "../types";
 import { toJsonSchema } from "./client";
 import { describeTable } from "./context";
@@ -221,7 +222,98 @@ const predict = define({
   },
 });
 
-const tools = [describeTableTool, runSql, createChart, forecast, trainModel, predict];
+const seriesFields = {
+  table: z.string(),
+  date_column: z.string(),
+  value_column: nullable(z.string()).describe("Numeric column. Null when agg is count."),
+  agg: z.enum(["sum", "avg", "count"]),
+  grain: nullable(z.enum(["day", "week", "month", "quarter", "year"])).describe("Null to use the data's own spacing."),
+  where: nullable(z.string()).describe("Optional SQL filter, e.g. region = 'West'"),
+};
+
+type SeriesInput = { table: string; date_column: string; value_column: string | null; agg: "sum" | "avg" | "count"; grain: "day" | "week" | "month" | "quarter" | "year" | null; where: string | null };
+
+const seriesRequest = (input: SeriesInput) => ({
+  table: input.table,
+  dateColumn: input.date_column,
+  valueColumn: input.value_column,
+  agg: input.agg,
+  grain: input.grain,
+  where: input.where,
+});
+
+const findAnomalies = define({
+  name: "find_anomalies",
+  description:
+    "Find unusual days or periods in a time series, allowing for trend and weekday or seasonal patterns, and show a chart with logged events marked on it. Use for 'anything unusual', 'what stands out', 'when did things go wrong'. Report the warnings it returns.",
+  schema: z.object(seriesFields),
+  label: (input) => `Looking for unusual periods in ${input.table}`,
+  run: async (input) => {
+    const { result, chart } = await buildTimeline(seriesRequest(input));
+    const lines = result.anomalies.slice(0, 20).map((a) => `${a.date}: ${a.value.toFixed(2)} vs ${a.expected.toFixed(2)} expected (${a.direction}, score ${a.score.toFixed(1)})`);
+    const hidden = result.segments.map((a) => `${a.date}: ${a.dimension}=${a.segment} ${a.value.toFixed(2)} vs ${a.expected.toFixed(2)} expected (${a.direction})`);
+    const notes = result.events.slice(0, 20).map((e) => `${e.date} [${e.category}] ${e.title}`);
+    return {
+      content: [
+        `The timeline chart is on screen. ${result.label} by ${result.grain}. ${result.anomalies.length} unusual ${result.grain}s, strongest first.`,
+        lines.join("\n") || "None found.",
+        hidden.length ? `Unusual inside one segment, which the total may hide:\n${hidden.join("\n")}` : "",
+        notes.length ? `Logged events in this range:\n${notes.join("\n")}` : "No logged events in this range.",
+        result.warnings.length ? `Warnings:\n- ${result.warnings.join("\n- ")}` : "",
+      ].filter(Boolean).join("\n"),
+      detail: `${result.anomalies.length} unusual`,
+      artifact: { kind: "chart", payload: chart },
+    };
+  },
+});
+
+const explainDate = define({
+  name: "explain_date",
+  description:
+    "Explain one day or period: how it compares with four comparable periods, which segments account for the change across the table's category columns, and which logged events fall nearby. Use for 'what happened on this date' or 'why did this move'. The segments show where the change sits, not why it happened.",
+  schema: z.object({ ...seriesFields, date: z.string().describe("YYYY-MM-DD") }),
+  label: (input) => `Breaking down ${input.date}`,
+  run: async (input) => {
+    const result = await explainPeriod({ ...seriesRequest(input), date: input.date });
+    const rows = result.movers.map((m) => ({ column: m.dimension, segment: m.segment, value: m.value, usual: Math.round(m.baseline * 100) / 100, change: Math.round(m.change * 100) / 100 }));
+    return {
+      content: JSON.stringify({ ...result, events: result.events.map((e) => ({ date: e.date, category: e.category, title: e.title, detail: e.detail })) }),
+      detail: result.changePct === null ? undefined : `${result.changePct >= 0 ? "+" : ""}${(result.changePct * 100).toFixed(0)}% vs usual`,
+      artifact: rows.length
+        ? {
+            kind: "table",
+            sql: "",
+            data: {
+              columns: [
+                { name: "column", type: "VARCHAR" },
+                { name: "segment", type: "VARCHAR" },
+                { name: "value", type: "DOUBLE" },
+                { name: "usual", type: "DOUBLE" },
+                { name: "change", type: "DOUBLE" },
+              ],
+              rows,
+              truncated: false,
+              ms: 0,
+            },
+          }
+        : undefined,
+    };
+  },
+});
+
+const measureEvent = define({
+  name: "event_impact",
+  description:
+    "Measure whether a measure changed around a date, comparing periods before and after it, then testing how often ordinary dates show a change that large. Use for 'did the campaign work' or 'did the release change anything'. Report the verdict as given. This shows timing, not proof of cause.",
+  schema: z.object({ ...seriesFields, date: z.string().describe("The event date, YYYY-MM-DD"), window: nullable(z.number().int()).describe("Periods on each side. Null for a sensible default.") }),
+  label: (input) => `Measuring the change around ${input.date}`,
+  run: async (input) => {
+    const result = await measureImpact({ ...seriesRequest(input), date: input.date, window: input.window });
+    return { content: JSON.stringify(result), detail: result.verdict };
+  },
+});
+
+const tools = [describeTableTool, runSql, createChart, forecast, trainModel, predict, findAnomalies, explainDate, measureEvent];
 
 /** Fixed and in a fixed order: the request's tool list must never vary inside a conversation. */
 export const toolDefinitions = tools.map((tool) => ({

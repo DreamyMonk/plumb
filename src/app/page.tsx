@@ -66,7 +66,7 @@ export default function HomePage() {
     <div className="max-w-5xl mx-auto px-4 md:px-8 py-8">
       <PageHeader
         title="Your data"
-        subtitle="Bring in files or a database. Sift cleans them, then you can ask questions, forecast and build dashboards."
+        subtitle="Bring in files or a database. Plumb cleans them, then you can ask questions, forecast and build dashboards."
         actions={
           <Button busy={loadingSample} onClick={() => void loadSample()}>
             <FlaskConical size={14} /> Load sample data

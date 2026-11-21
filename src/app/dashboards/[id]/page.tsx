@@ -1,12 +1,12 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Maximize2, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2, Radio, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useState } from "react";
+import { use, useRef, useState } from "react";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { Button, Empty, inputClass, Note, PageHeader, Spinner } from "@/components/ui";
-import { api, useApi } from "@/lib/client";
+import { api, useApi, useLiveUpdates } from "@/lib/client";
 import type { ChartPayload, Dashboard, Widget } from "@/lib/types";
 import { useGenerator } from "@/components/useGenerator";
 
@@ -16,6 +16,11 @@ const SPAN: Record<Widget["size"], string> = {
   l: "col-span-12",
 };
 const NEXT_SIZE: Record<Widget["size"], Widget["size"]> = { s: "m", m: "l", l: "s" };
+const LIVE_REFRESH_MS = 1500;
+
+function usesTable(dashboard: Dashboard, table: string): boolean {
+  return dashboard.tables.includes(table) || dashboard.widgets.some((w) => w.spec.sql?.includes(table) || w.spec.timeline?.table === table);
+}
 
 export default function DashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -24,6 +29,19 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   const [instruction, setInstruction] = useState("");
   const [confirming, setConfirming] = useState(false);
   const { status, error: generateError, generate, clearError } = useGenerator();
+  const [live, setLive] = useState(false);
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bursts of rows become one refresh, because every refresh re-runs each widget's query.
+  useLiveUpdates((update) => {
+    if (!update.table || !data || !usesTable(data.dashboard, update.table)) return;
+    setLive(true);
+    if (pending.current) return;
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      void refresh();
+    }, LIVE_REFRESH_MS);
+  });
 
   if (loading && !data) return <Spinner label="Running queries" />;
   if (error || !data) return <Empty title="Dashboard not found" action={<Link href="/dashboards"><Button>All dashboards</Button></Link>}>{error}</Empty>;
@@ -77,7 +95,8 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         subtitle={dashboard.summary}
         actions={
           <>
-            <Button busy={loading} onClick={() => void refresh()}><RefreshCw size={14} /> Refresh</Button>
+            {live ? <span className="flex items-center gap-1.5 text-[12.5px] text-ink-2"><Radio size={13} className="pulse-dot text-good" aria-hidden /> Live</span> : null}
+            <Button busy={loading && !live} onClick={() => void refresh()}><RefreshCw size={14} /> Refresh</Button>
             {confirming ? <Button variant="danger" onClick={() => void removeDashboard()}>Confirm delete</Button> : <Button variant="ghost" aria-label="Delete dashboard" title="Delete dashboard" onClick={() => setConfirming(true)}><Trash2 size={14} /></Button>}
           </>
         }

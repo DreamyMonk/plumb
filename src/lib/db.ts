@@ -11,7 +11,7 @@ import {
 } from "@duckdb/node-api";
 import type { ColumnInfo, QueryData, Row } from "./types";
 
-export const DATA_DIR = process.env.SIFT_DATA_DIR ?? path.join(process.cwd(), ".data");
+export const DATA_DIR = process.env.PLUMB_DATA_DIR ?? path.join(process.cwd(), ".data");
 
 const QUERY_TIMEOUT_MS = 30_000;
 export const MAX_QUERY_ROWS = 5_000;
@@ -33,10 +33,10 @@ const NUMERIC_TYPES = new Set<number>([
 ]);
 
 // Survives Next.js hot reloads; DuckDB allows one read-write process per file.
-const globalForDb = globalThis as unknown as { __siftDb?: Promise<DuckDBInstance> };
+const globalForDb = globalThis as unknown as { __plumbDb?: Promise<DuckDBInstance> };
 
 function getInstance(): Promise<DuckDBInstance> {
-  globalForDb.__siftDb ??= (async () => {
+  globalForDb.__plumbDb ??= (async () => {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     // External access stays off for the whole instance. All data arrives through
     // our own parsers, so SQL (including SQL written by the model) can never reach
@@ -48,7 +48,7 @@ function getInstance(): Promise<DuckDBInstance> {
       memory_limit: "4GB",
     });
   })();
-  return globalForDb.__siftDb;
+  return globalForDb.__plumbDb;
 }
 
 export async function withConnection<T>(fn: (conn: DuckDBConnection) => Promise<T>): Promise<T> {

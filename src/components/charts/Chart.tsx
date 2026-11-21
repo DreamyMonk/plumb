@@ -14,6 +14,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -22,7 +23,7 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import { prepare, scatterGroups, seriesColor } from "@/lib/chart-data";
+import { placeEvents, prepare, scatterGroups, seriesColor, type PlacedEvent } from "@/lib/chart-data";
 import { axisFormatter, compact, exactValue, formatTick, formatValue, humanize } from "@/lib/format";
 import type { ChartPayload, Row, ValueFormat } from "@/lib/types";
 import { ArrowDown, ArrowUp } from "lucide-react";
@@ -84,6 +85,59 @@ function Legend({ items }: { items: { name: string; color: string; dashed?: bool
         </li>
       ))}
     </ul>
+  );
+}
+
+const MAX_LISTED_EVENTS = 6;
+
+/** Reference lines must be direct chart children, so this returns elements, not a component. */
+function eventLines(marks: PlacedEvent[]) {
+  return marks.map((mark) => (
+    <ReferenceLine key={mark.n} x={mark.x as string} stroke="var(--ink-3)" strokeWidth={1} label={{ value: mark.n, position: "top", fill: "var(--ink-2)", fontSize: 10, fontWeight: 600 }} />
+  ));
+}
+
+function EventKey({ marks }: { marks: PlacedEvent[] }) {
+  if (marks.length === 0) return null;
+  const hidden = marks.length - MAX_LISTED_EVENTS;
+  return (
+    <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[12px] text-ink-2">
+      {marks.slice(0, MAX_LISTED_EVENTS).map((mark) => (
+        <li key={mark.n}>
+          <span className="font-semibold tnum">{mark.n}</span> {mark.title} <span className="text-ink-3 tnum">{formatTick(mark.date)}</span>
+        </li>
+      ))}
+      {hidden > 0 ? <li className="text-ink-3">and {hidden} more</li> : null}
+    </ol>
+  );
+}
+
+function Timeline({ payload, height }: { payload: ChartPayload; height: number }) {
+  const { rows } = payload;
+  const marks = placeEvents(payload.events, rows, "date");
+  return (
+    <div>
+      <Legend
+        items={[
+          { name: "Actual", color: "var(--series-1)" },
+          { name: "Expected", color: "var(--series-other)" },
+          { name: "Unusual", color: "var(--series-2)" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={rows} margin={{ ...margin, top: 18 }}>
+          <CartesianGrid vertical={false} {...grid} />
+          <XAxis dataKey="date" tick={tick} tickLine={false} axisLine={axisLine} tickFormatter={axisFormatter(rows, "date")} minTickGap={48} />
+          <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => compact(Number(v))} width={48} />
+          <Tooltip cursor={crosshair} content={(props) => <Readout {...(props as unknown as ReadoutProps)} hide={["unusual"]} />} />
+          {eventLines(marks)}
+          <Line dataKey="expected" stroke="var(--series-other)" strokeWidth={1.5} dot={false} isAnimationActive={false} activeDot={false} />
+          <Line dataKey="value" stroke="var(--series-1)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }} />
+          <Line dataKey="unusual" stroke="none" isAnimationActive={false} connectNulls={false} legendType="none" activeDot={false} dot={{ r: 5, strokeWidth: 2, stroke: "var(--surface)", fill: "var(--series-2)" }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <EventKey marks={marks} />
+    </div>
   );
 }
 
@@ -167,6 +221,7 @@ function Heatmap({ payload }: { payload: ChartPayload }) {
 
 function Forecast({ payload, height }: { payload: ChartPayload; height: number }) {
   const rows = payload.rows.map((row) => ({ ...row, band: row.lower === null || row.lower === undefined ? null : [row.lower, row.upper] }));
+  const marks = placeEvents(payload.events, rows, "date");
   return (
     <div>
       <Legend
@@ -177,16 +232,18 @@ function Forecast({ payload, height }: { payload: ChartPayload; height: number }
         ]}
       />
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={rows} margin={margin}>
+        <ComposedChart data={rows} margin={marks.length ? { ...margin, top: 18 } : margin}>
           <CartesianGrid vertical={false} {...grid} />
           <XAxis dataKey="date" tick={tick} tickLine={false} axisLine={axisLine} tickFormatter={axisFormatter(rows, "date")} minTickGap={40} />
           <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={(v) => compact(Number(v))} width={48} />
           <Tooltip cursor={crosshair} content={(props) => <ForecastReadout {...(props as unknown as ReadoutProps)} />} />
+          {eventLines(marks)}
           <Area dataKey="band" stroke="none" fill="var(--series-1)" fillOpacity={0.14} isAnimationActive={false} connectNulls={false} activeDot={false} />
           <Line dataKey="actual" stroke="var(--series-1)" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }} />
           <Line dataKey="forecast" stroke="var(--series-1)" strokeWidth={2} strokeDasharray="5 4" dot={false} isAnimationActive={false} connectNulls={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }} />
         </ComposedChart>
       </ResponsiveContainer>
+      <EventKey marks={marks} />
     </div>
   );
 }
@@ -222,6 +279,7 @@ export function Chart({ payload, height = 260 }: { payload: ChartPayload; height
   if (spec.type === "kpi") return <Kpi payload={payload} />;
   if (spec.type === "heatmap") return <Heatmap payload={payload} />;
   if (spec.type === "forecast") return <Forecast payload={payload} height={height} />;
+  if (spec.type === "timeline") return <Timeline payload={payload} height={height} />;
 
   const format = spec.format;
   const currency = spec.currency;
@@ -250,6 +308,8 @@ export function Chart({ payload, height = 260 }: { payload: ChartPayload; height
   }
 
   const { rows, keys, xKey } = prepare(payload);
+  const marks = spec.type === "line" || spec.type === "area" || spec.type === "bar" || spec.type === "stacked_bar" ? placeEvents(payload.events, rows, xKey) : [];
+  const timeMargin = marks.length ? { ...margin, top: 18 } : margin;
   const legend = keys.length > 1 ? <Legend items={keys.map((key) => ({ name: key, color: seriesColor(keys, key) }))} /> : null;
   const yTicks = (value: number) => formatValue(value, format, currency);
   const readout = (props: unknown) => <Readout {...(props as ReadoutProps)} format={format} currency={currency} />;
@@ -293,31 +353,37 @@ export function Chart({ payload, height = 260 }: { payload: ChartPayload; height
     const dots = rows.length <= 12;
     if (spec.type === "area" && keys.length === 1) {
       return (
+        <div>
         <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={rows} margin={margin}>
+          <AreaChart data={rows} margin={timeMargin}>
             <CartesianGrid vertical={false} {...grid} />
             <XAxis dataKey={xKey} tick={tick} tickLine={false} axisLine={axisLine} tickFormatter={axisFormatter(rows, xKey)} minTickGap={32} />
             <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={yTicks} width={52} />
             <Tooltip cursor={crosshair} content={readout} />
+            {eventLines(marks)}
             <Area dataKey={keys[0]} stroke="var(--series-1)" strokeWidth={2} fill="var(--series-1)" fillOpacity={0.1} isAnimationActive={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }} />
           </AreaChart>
         </ResponsiveContainer>
+        <EventKey marks={marks} />
+        </div>
       );
     }
     return (
       <div>
         {legend}
         <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={rows} margin={margin}>
+          <LineChart data={rows} margin={timeMargin}>
             <CartesianGrid vertical={false} {...grid} />
             <XAxis dataKey={xKey} tick={tick} tickLine={false} axisLine={axisLine} tickFormatter={axisFormatter(rows, xKey)} minTickGap={32} />
             <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={yTicks} width={52} />
             <Tooltip cursor={crosshair} content={readout} />
+            {eventLines(marks)}
             {keys.map((key) => (
               <Line key={key} dataKey={key} stroke={seriesColor(keys, key)} strokeWidth={2} isAnimationActive={false} connectNulls dot={dots ? { r: 3, strokeWidth: 2, stroke: "var(--surface)", fill: seriesColor(keys, key) } : false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }} />
             ))}
           </LineChart>
         </ResponsiveContainer>
+        <EventKey marks={marks} />
       </div>
     );
   }
@@ -351,16 +417,18 @@ export function Chart({ payload, height = 260 }: { payload: ChartPayload; height
     <div>
       {legend}
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={rows} margin={margin} barCategoryGap="28%" barGap={2}>
+        <BarChart data={rows} margin={timeMargin} barCategoryGap="28%" barGap={2}>
           <CartesianGrid vertical={false} {...grid} />
           <XAxis dataKey={xKey} tick={tick} tickLine={false} axisLine={axisLine} tickFormatter={axisFormatter(rows, xKey)} minTickGap={16} />
           <YAxis tick={tick} tickLine={false} axisLine={false} tickFormatter={yTicks} width={52} />
           <Tooltip cursor={barHover} content={readout} />
+          {eventLines(marks)}
           {keys.map((key, index) => (
             <Bar key={key} dataKey={key} stackId={stacked ? "s" : undefined} fill={seriesColor(keys, key)} maxBarSize={24} radius={!stacked || index === keys.length - 1 ? [4, 4, 0, 0] : 0} stroke={stacked ? "var(--surface)" : undefined} strokeWidth={stacked ? 2 : 0} isAnimationActive={false} />
           ))}
         </BarChart>
       </ResponsiveContainer>
+      <EventKey marks={marks} />
     </div>
   );
 }

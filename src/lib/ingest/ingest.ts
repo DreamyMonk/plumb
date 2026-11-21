@@ -109,14 +109,20 @@ export async function applyTransform(dataset: Dataset, op: TransformOp): Promise
   return refresh({ ...dataset, steps: [...dataset.steps, op] }, renames);
 }
 
-/** Undo replays the remaining steps on the auto-cleaned baseline. */
-export async function undoTransform(dataset: Dataset): Promise<Dataset> {
-  if (dataset.steps.length === 0) return dataset;
-  const steps = dataset.steps.slice(0, -1);
+/** Recreates the live table: the auto-cleaned baseline plus each step the user applied. */
+export async function rebuildFromBase(dataset: Dataset): Promise<Map<string, string>> {
   await exec(`CREATE OR REPLACE TABLE ${ident(dataset.id)} AS SELECT * FROM ${ident(baseTable(dataset.id))}`);
   const renames = new Map<string, string>();
-  for (const step of steps) await applyOp(dataset.id, step, renames);
-  return refresh({ ...dataset, steps }, renames);
+  for (const step of dataset.steps) await applyOp(dataset.id, step, renames);
+  return renames;
+}
+
+export const refreshDataset = (dataset: Dataset) => refresh(dataset, new Map());
+
+export async function undoTransform(dataset: Dataset): Promise<Dataset> {
+  if (dataset.steps.length === 0) return dataset;
+  const next = { ...dataset, steps: dataset.steps.slice(0, -1) };
+  return refresh(next, await rebuildFromBase(next));
 }
 
 export async function removeDataset(id: string): Promise<void> {

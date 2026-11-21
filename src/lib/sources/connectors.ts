@@ -118,7 +118,7 @@ export async function readRemoteTable(kind: DbKind, url: string, table: RemoteTa
 
 export async function readSqliteFile(fileName: string, buffer: Buffer, limit = DEFAULT_ROW_LIMIT): Promise<ParsedTable[]> {
   const { DatabaseSync } = await import("node:sqlite");
-  const temp = path.join(os.tmpdir(), `sift-${newId()}.sqlite`);
+  const temp = path.join(os.tmpdir(), `plumb-${newId()}.sqlite`);
   await fs.writeFile(temp, buffer);
   const db = new DatabaseSync(temp, { readOnly: true });
   try {

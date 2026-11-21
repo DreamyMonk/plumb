@@ -246,6 +246,22 @@ export function runForecast({ dates, values, grain, horizon, warnings = [] }: Se
   };
 }
 
+/** The data's own spacing, with no rollup. Timelines want days when the data has days. */
+export function inferBaseGrain(sortedDates: string[]): Grain {
+  if (sortedDates.length < 2) return "day";
+  const gaps: number[] = [];
+  for (let i = 1; i < sortedDates.length; i++) {
+    gaps.push((Date.parse(sortedDates[i]) - Date.parse(sortedDates[i - 1])) / 86_400_000);
+  }
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  if (median <= 1.5) return "day";
+  if (median <= 8) return "week";
+  if (median <= 35) return "month";
+  if (median <= 100) return "quarter";
+  return "year";
+}
+
 export function inferGrain(sortedDates: string[]): Grain {
   if (sortedDates.length < 2) return "day";
   const gaps: number[] = [];

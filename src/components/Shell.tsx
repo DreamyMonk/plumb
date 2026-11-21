@@ -1,17 +1,19 @@
 "use client";
 
-import { Database, FileSpreadsheet, KeyRound, LayoutDashboard, MessageSquare, Moon, Sun, TrendingUp } from "lucide-react";
+import { CalendarClock, Database, FileSpreadsheet, KeyRound, LayoutDashboard, MessageSquare, Moon, Radio, Sun, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
-import { useApi } from "@/lib/client";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useApi, useLiveUpdates } from "@/lib/client";
 import type { Dataset, Status } from "@/lib/types";
 
 const NAV = [
   { href: "/", label: "Data", icon: Database, match: (path: string) => path === "/" || path.startsWith("/data") },
   { href: "/chat", label: "Chat", icon: MessageSquare, match: (path: string) => path.startsWith("/chat") },
   { href: "/dashboards", label: "Dashboards", icon: LayoutDashboard, match: (path: string) => path.startsWith("/dashboards") },
+  { href: "/timeline", label: "Timeline", icon: CalendarClock, match: (path: string) => path.startsWith("/timeline") },
   { href: "/predict", label: "Predict", icon: TrendingUp, match: (path: string) => path.startsWith("/predict") },
+  { href: "/streams", label: "Streams", icon: Radio, match: (path: string) => path.startsWith("/streams") },
 ];
 
 function ThemeToggle() {
@@ -42,6 +44,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const { data: status } = useApi<Status>("/api/status");
   const { data: datasets, refresh } = useApi<Dataset[]>("/api/datasets");
 
+  const known = useRef(new Set<string>());
+  useEffect(() => {
+    known.current = new Set(datasets?.map((d) => d.id));
+  }, [datasets]);
+  useLiveUpdates((update) => {
+    if (update.table && !known.current.has(update.table)) void refresh();
+  });
+
   useEffect(() => {
     const onChange = () => void refresh();
     window.addEventListener("datasets-changed", onChange);
@@ -53,9 +63,9 @@ export function Shell({ children }: { children: ReactNode }) {
       <aside className="md:w-56 md:shrink-0 md:h-screen md:sticky md:top-0 bg-surface border-b md:border-b-0 md:border-r border-line flex md:flex-col">
         <div className="flex items-center gap-2 px-4 h-14 shrink-0">
           <span className="grid place-items-center size-6 rounded-md bg-accent text-on-accent font-semibold text-[13px]" aria-hidden>
-            S
+            P
           </span>
-          <span className="font-semibold tracking-tight max-md:hidden">Sift</span>
+          <span className="font-semibold tracking-tight max-md:hidden">Plumb</span>
         </div>
         <nav aria-label="Main" className="flex md:flex-col gap-0.5 md:px-2 items-center md:items-stretch">
           {NAV.map(({ href, label, icon: Icon, match }) => {

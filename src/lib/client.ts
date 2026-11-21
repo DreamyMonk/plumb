@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { LiveUpdate } from "./types";
 
 export async function api<T>(url: string, init?: RequestInit & { body?: BodyInit | null }): Promise<T> {
   const response = await fetch(url, init);
@@ -63,3 +64,14 @@ export async function readStream<E>(response: Response, onEvent: (event: E) => v
 
 /** Datasets changed: tells the sidebar to reload. */
 export const notifyDatasets = () => window.dispatchEvent(new Event("datasets-changed"));
+
+/** Calls back when a stream writes new data. EventSource reconnects by itself if dropped. */
+export function useLiveUpdates(onUpdate: (update: LiveUpdate) => void): void {
+  const latest = useRef(onUpdate);
+  latest.current = onUpdate;
+  useEffect(() => {
+    const source = new EventSource("/api/streams/live");
+    source.onmessage = (message) => latest.current(JSON.parse(message.data) as LiveUpdate);
+    return () => source.close();
+  }, []);
+}

@@ -9,6 +9,7 @@ const config: NextConfig = {
     "pg",
     "mysql2",
     "xlsx",
+    "kafkajs",
   ],
   experimental: {
     // Uploads pass through src/proxy.ts, which would otherwise cap bodies at 10 MB.

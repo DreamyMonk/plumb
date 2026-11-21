@@ -2,6 +2,7 @@ import { z } from "zod";
 import { json, route } from "@/lib/api";
 import { applyTransform, undoTransform } from "@/lib/ingest/ingest";
 import { datasets } from "@/lib/store";
+import { withTableLock } from "@/lib/streams/lock";
 import type { TransformOp } from "@/lib/types";
 
 type Context = { params: Promise<{ id: string }> };
@@ -19,9 +20,11 @@ const body = z.union([z.object({ transform: op }), z.object({ undo: z.literal(tr
 
 export const POST = route<Context>(async (request, { params }) => {
   const { id } = await params;
-  const dataset = await datasets.get(id);
-  if (!dataset) return json({ error: "Dataset not found." }, 404);
   const input = body.parse(await request.json());
-  const next = "undo" in input ? await undoTransform(dataset) : await applyTransform(dataset, input.transform as TransformOp);
-  return json(next);
+  const next = await withTableLock(`table:${id}`, async () => {
+    const dataset = await datasets.get(id);
+    if (!dataset) return null;
+    return "undo" in input ? undoTransform(dataset) : applyTransform(dataset, input.transform as TransformOp);
+  });
+  return next ? json(next) : json({ error: "Dataset not found." }, 404);
 });

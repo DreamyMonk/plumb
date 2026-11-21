@@ -6,7 +6,7 @@ import { Shell } from "@/components/Shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sift",
+  title: "Plumb",
   description: "Connect data, clean it, chat with it, forecast it and build dashboards.",
 };
 

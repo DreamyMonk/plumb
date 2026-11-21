@@ -1,4 +1,4 @@
-# Sift
+# Plumb
 
 Connect data, get it cleaned automatically, then chat with it, forecast it and build dashboards. Runs locally. The AI is Claude Sonnet 5.5.
 
@@ -55,6 +55,10 @@ Judgment calls, like filling missing values or removing outliers, are only sugge
 
 **Dashboards.** Claude designs KPIs and charts from your data, runs every query, repairs any that fail, then writes insights from the actual results. Dashboards re-query on each load.
 
+**Timeline.** Log what happened and when, such as a promotion, outage or release, and it appears on charts across the app. Plumb also finds unusual days by itself, allowing for trend and weekday or seasonal patterns. Select a day to see which segments account for the change, or press **Measure** on an event to compare the periods before and after it. That result is checked against how often ordinary dates show a change that large, so normal seasonality isn't reported as an effect. Chat can do all of this too, for example "what happened on March 12?".
+
+**Streams.** Send live data from your pipelines. Each stream gets a secure endpoint, with setup snippets for curl, Python, Airflow, Spark, Kafka Connect, Vector, dbt Cloud and Fivetran. Plumb can also read a Kafka topic directly. Rows land in a table, new fields become new columns, and open dashboards update by themselves. Pipeline events, such as a failed dbt or Airflow run, can land on the Timeline instead.
+
 **Predict.** Forecasts compare several methods by backtest on your own data and report accuracy against a simple baseline. Outcome models are random forests evaluated on held-out rows, with what-if scoring. All of this math runs locally, so the accuracy figures come from your data, not from the language model.
 
 ## Data and privacy
@@ -69,12 +73,27 @@ SQL written by the model can't change data or reach outside the database. DuckDB
 
 There is no login. The app listens on 127.0.0.1 only and rejects requests from other sites. Don't expose it to a network without adding authentication.
 
+### Streaming from other machines
+
+`npm run start:network` listens on all network interfaces so pipelines on other machines can reach the ingest endpoint. Only `/api/ingest` answers remote requests, and each stream needs its token, which is stored only as a hash. Everything else still rejects non-local requests. Traffic is plain HTTP, so put it behind a TLS proxy or tunnel if it leaves a trusted network. Tools in Docker can usually reach it at `host.docker.internal:3000`.
+
+### Delivery
+
+- HTTP: the reply comes after the rows are saved, so a sender that gets an error can safely retry.
+- Kafka: offsets are committed after the rows are saved. A crash can redeliver messages, so set a unique ID field on the stream to skip repeats.
+- Kafka messages must be JSON. Avro and Protobuf with a schema registry aren't supported.
+- SASL credentials come from `KAFKA_SASL_USERNAME` and `KAFKA_SASL_PASSWORD` in `.env.local`.
+
 ## Limits
 
 - Files are parsed in memory, so very large files need a matching amount of RAM. A 620,000-row CSV took about 7 seconds.
 - Only one running copy can use `.data/` at a time, because DuckDB locks its file.
 - Model training uses up to 20,000 sampled rows and doesn't use date columns.
-- Imports are snapshots. To refresh database data, import it again.
+- Database imports are snapshots. To refresh that data, import it again, or send changes through a stream.
+- Each HTTP request can carry up to 100,000 records or 50 MB.
+- A stream's first batch sets its column types. Numbers can later widen to decimals and dates to timestamps. A value that fits neither is blanked and counted on the Streams page.
+- Unusual-period detection needs at least 14 periods of history.
+- A short incident in a low-volume group can be missed. Automatic scans skip a drop that could plausibly be chance, so at around 6 rows a day a single empty day stays off the list. You can still look up that date yourself.
 
 ## Development
 

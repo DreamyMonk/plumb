@@ -20,7 +20,7 @@ export const POST = route<Context>(async (request, { params }) => {
     id: newId(),
     spec,
     size: spec.type === "kpi" ? "s" : "m",
-    rows: spec.sql ? undefined : (input.rows as Row[]),
+    rows: spec.sql || spec.timeline ? undefined : (input.rows as Row[]),
   });
   dashboard.updatedAt = new Date().toISOString();
   await dashboards.save(dashboard);

@@ -53,14 +53,19 @@ function retailOrders() {
     const month = d.getUTCMonth();
     const seasonal = 1 + 0.35 * Math.cos((2 * Math.PI * (month - 11)) / 12);
     const weekend = d.getUTCDay() === 0 || d.getUTCDay() === 6 ? 1.25 : 1;
-    const orders = Math.round(4.2 * (1 + 0.22 * years) * seasonal * weekend + gaussian());
+    const iso = d.toISOString().slice(0, 10);
+    const promo = iso === "2025-11-28"; // Black Friday: a burst of discounted online electronics
+    const orders = Math.round(13 * (1 + 0.22 * years) * seasonal * weekend * (promo ? 7 : 1) + gaussian());
     for (let i = 0; i < Math.max(0, orders); i++) {
-      const category = weighted([["Electronics", 4], ["Home", 3], ["Outdoors", month >= 4 && month <= 8 ? 4 : 1.5], ["Office", 2]]);
+      const onPromo = promo && random() < 0.85;
+      const category = onPromo ? "Electronics" : weighted([["Electronics", 4], ["Home", 3], ["Outdoors", month >= 4 && month <= 8 ? 4 : 1.5], ["Office", 2]]);
       const [product, price] = pick(PRODUCTS[category]);
       const region = weighted(REGION_WEIGHT);
-      const channel = weighted([["Online", 5 + years], ["Retail", 4], ["Partner", 1.5]]);
+      const channel = onPromo ? "Online" : weighted([["Online", 5 + years], ["Retail", 4], ["Partner", 1.5]]);
+      if (iso === "2026-03-12" && channel === "Online") continue; // checkout outage (logged)
+      if (iso === "2026-07-08" && region === "West") continue; // West warehouse closed (not logged)
       const qty = 1 + Math.floor(random() ** 2.4 * 5);
-      const discount = weighted([[0, 6], [5, 2], [10, 2], [15, 1], [25, 0.4]]);
+      const discount = onPromo ? 25 : weighted([[0, 6], [5, 2], [10, 2], [15, 1], [25, 0.4]]);
       const unit = Math.round(price * (1 + gaussian() * 0.03) * 100) / 100;
       const revenue = Math.round(qty * unit * (1 - discount / 100) * 100) / 100;
       rows.push({ date: d, category, product, region, channel, qty, unit, discount, revenue, returned: random() < (category === "Electronics" ? 0.09 : 0.04) });
@@ -88,7 +93,7 @@ function retailOrders() {
     const line = cells.map(csv).join(",");
     lines.push(line);
     if (random() < 0.01) lines.push(line); // exact duplicate
-    if (index > 0 && index % 3500 === 0) lines.push(header.join(",")); // repeated page header
+    if (index > 0 && index % 10000 === 0) lines.push(header.join(",")); // repeated page header
   });
   const total = rows.reduce((sum, row) => sum + row.revenue, 0);
   lines.push(["Total", "", "", "", "", "", "", "", "", `"$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}"`, "", "", ""].join(","));

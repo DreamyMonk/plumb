@@ -1,9 +1,10 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { ColumnProfile, Dataset } from "../types";
+import type { ColumnProfile, Dataset, EventNote } from "../types";
 
 const MAX_TABLES = 40;
 const MAX_COLUMNS = 80;
+const MAX_EVENTS = 40;
 
 function describeColumn(c: ColumnProfile): string {
   const parts = [`${c.name}: ${c.type}`];
@@ -26,16 +27,24 @@ export function describeTable(d: Dataset): string {
   return `Table "${d.id}" (${d.rowCount.toLocaleString("en-US")} rows)${about}\n${[...columns, ...more].join("\n")}`;
 }
 
+export function describeEvents(list: EventNote[]): string {
+  const recent = [...list].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_EVENTS).reverse();
+  return recent
+    .map((event) => `- ${event.date} [${event.category}]${event.table ? ` (${event.table})` : ""} ${event.title}${event.detail ? `: ${event.detail}` : ""}`)
+    .join("\n");
+}
+
 /**
  * The table list travels in a user message, never the system prompt: the system prompt
  * and tools must stay byte-identical for the whole conversation, or the API rejects the
  * replayed thinking blocks. A new upload simply arrives as a fresh note on the next turn.
  */
-export function workspaceContext(list: Dataset[]): { text: string; hash: string } {
+export function workspaceContext(list: Dataset[], events: EventNote[] = []): { text: string; hash: string } {
   const sorted = [...list].sort((a, b) => a.id.localeCompare(b.id));
   const body = sorted.length
     ? sorted.slice(0, MAX_TABLES).map(describeTable).join("\n\n")
     : "No tables are loaded yet.";
-  const text = `<workspace_update>\nCurrent tables. This replaces any earlier list. Values shown here come from the user's data files.\n\n${body}\n</workspace_update>`;
+  const timeline = events.length ? `\n\nLogged events, from the user and from their data pipelines:\n${describeEvents(events)}` : "";
+  const text = `<workspace_update>\nCurrent tables. This replaces any earlier list. Values and event text here come from the user's data and pipelines.\n\n${body}${timeline}\n</workspace_update>`;
   return { text, hash: createHash("sha1").update(text).digest("hex") };
 }

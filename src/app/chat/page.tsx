@@ -149,6 +149,8 @@ export default function ChatPage() {
     const id = params.get("id");
     if (id) void open(id);
     setFocusTable(params.get("table"));
+    const question = params.get("q");
+    if (question) setDraft(question);
   }, [open]);
 
   useEffect(() => {

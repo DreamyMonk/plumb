@@ -13,7 +13,7 @@ export const GET = route<Context>(async (_request, { params }) => {
   // Charts re-run on every load, so a dashboard always reflects the current data.
   const payloads: ChartPayload[] = await Promise.all(
     dashboard.widgets.map((widget) =>
-      widget.spec.sql ? buildChartSafe(widget.spec) : Promise.resolve({ spec: widget.spec, columns: [], rows: widget.rows ?? [] }),
+      widget.spec.sql || widget.spec.timeline ? buildChartSafe(widget.spec) : Promise.resolve({ spec: widget.spec, columns: [], rows: widget.rows ?? [] }),
     ),
   );
   return json({ dashboard, payloads });

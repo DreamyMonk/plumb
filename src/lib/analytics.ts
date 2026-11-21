@@ -1,5 +1,6 @@
 import "server-only";
 import { ident, query, safeQuery } from "./db";
+import { eventsFor, toMarks } from "./events";
 import { addPeriods, inferGrain, runForecast } from "./ml/forecast";
 import { predictRow, trainForest, type FeatureSpec, type ForestArtifact } from "./ml/forest";
 import { datasets, models, newId } from "./store";
@@ -8,7 +9,7 @@ import type { ChartPayload, ColumnProfile, Dataset, ForecastResult, Grain, Model
 const TRAIN_ROWS = 20_000;
 const MAX_FEATURES = 40;
 
-async function requireDataset(table: string): Promise<Dataset> {
+export async function requireDataset(table: string): Promise<Dataset> {
   const dataset = await datasets.get(table).catch(() => null);
   if (!dataset) throw new Error(`There is no table named "${table}".`);
   return dataset;
@@ -20,17 +21,29 @@ function requireColumn(dataset: Dataset, name: string): ColumnProfile {
   return column;
 }
 
-export interface ForecastRequest {
+export interface SeriesRequest {
   table: string;
   dateColumn: string;
   valueColumn?: string | null;
   agg: "sum" | "avg" | "count";
   grain?: Grain | null;
-  horizon?: number | null;
   where?: string | null;
 }
 
-export async function forecastTable(request: ForecastRequest): Promise<{ result: ForecastResult; chart: ChartPayload }> {
+export interface ForecastRequest extends SeriesRequest {
+  horizon?: number | null;
+}
+
+export interface LoadedSeries {
+  dates: string[];
+  values: number[];
+  grain: Grain;
+  label: string;
+  warnings: string[];
+}
+
+/** One evenly spaced series from a table, with gaps filled and a partial last period removed. */
+export async function loadSeries(request: SeriesRequest, pickGrain: (dates: string[]) => Grain = inferGrain): Promise<LoadedSeries> {
   const dataset = await requireDataset(request.table);
   const dateColumn = requireColumn(dataset, request.dateColumn);
   if (dateColumn.type !== "date" && dateColumn.type !== "datetime") {
@@ -53,7 +66,7 @@ export async function forecastTable(request: ForecastRequest): Promise<{ result:
       `SELECT DISTINCT CAST(${d} AS DATE)::VARCHAR AS day FROM ${table} WHERE ${d} IS NOT NULL ${filter} ORDER BY 1`,
       100_000,
     );
-    grain = inferGrain(distinct.rows.map((r) => String(r.day)));
+    grain = pickGrain(distinct.rows.map((r) => String(r.day)));
   }
 
   const data = await safeQuery(
@@ -64,7 +77,7 @@ export async function forecastTable(request: ForecastRequest): Promise<{ result:
   if (data.rows.length === 0) throw new Error("No rows matched.");
   const warnings: string[] = [];
 
-  // A half-finished last period looks like a collapse and would drag the forecast down.
+  // A half-finished last period looks like a collapse and would drag every result down.
   let rows = data.rows;
   if (rows.length > 3) {
     const typical = [...rows.slice(0, -1).map((r) => Number(r.days))].sort((a, b) => a - b)[Math.floor((rows.length - 1) / 2)];
@@ -93,10 +106,14 @@ export async function forecastTable(request: ForecastRequest): Promise<{ result:
   if (gaps > 0) {
     warnings.push(`${gaps} ${grain}${gaps === 1 ? " had" : "s had"} no rows and ${request.agg === "avg" ? "carried the previous value" : "counted as zero"}.`);
   }
-
-  const horizon = Math.max(1, Math.min(request.horizon ?? defaultHorizon(grain), 365));
-  const result = runForecast({ dates, values: filled, grain, horizon, warnings });
   const label = request.agg === "count" ? "Rows" : `${request.agg === "avg" ? "Average" : "Total"} ${request.valueColumn}`;
+  return { dates, values: filled, grain, label, warnings };
+}
+
+export async function forecastTable(request: ForecastRequest): Promise<{ result: ForecastResult; chart: ChartPayload }> {
+  const { dates, values, grain, label, warnings } = await loadSeries(request);
+  const horizon = Math.max(1, Math.min(request.horizon ?? defaultHorizon(grain), 365));
+  const result = runForecast({ dates, values, grain, horizon, warnings });
   const accuracy = result.mape !== null ? `typically off by about ${(result.mape * 100).toFixed(1)}%` : `average error ${result.mae.toFixed(2)}`;
   const chart: ChartPayload = {
     spec: {
@@ -114,6 +131,7 @@ export async function forecastTable(request: ForecastRequest): Promise<{ result:
       { name: "upper", type: "DOUBLE" },
     ],
     rows: result.points.map((point) => ({ ...point })),
+    events: toMarks(await eventsFor(request.table, dates[0], dates[dates.length - 1])),
   };
   return { result, chart };
 }

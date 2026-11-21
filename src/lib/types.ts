@@ -76,7 +76,7 @@ export interface Suggestion {
 }
 
 export interface SourceInfo {
-  kind: "file" | "sample" | "url" | "postgres" | "mysql" | "sqlite";
+  kind: "file" | "sample" | "url" | "postgres" | "mysql" | "sqlite" | "stream";
   name: string;
   sheet?: string;
 }
@@ -108,7 +108,8 @@ export type ChartType =
   | "heatmap"
   | "table"
   | "kpi"
-  | "forecast";
+  | "forecast"
+  | "timeline";
 
 export interface ChartSpec {
   type: ChartType;
@@ -121,6 +122,8 @@ export interface ChartSpec {
   series?: string;
   format?: ValueFormat;
   currency?: string;
+  /** Set on anomaly charts, so a pinned chart recomputes instead of going stale. */
+  timeline?: TimelineRequest;
 }
 
 export type Row = Record<string, unknown>;
@@ -144,6 +147,7 @@ export interface ChartPayload {
   rows: Row[];
   truncated?: boolean;
   error?: string;
+  events?: EventMark[];
 }
 
 export interface Widget {
@@ -263,4 +267,138 @@ export interface Status {
   aiConfigured: boolean;
   model: string;
   dataDir: string;
+}
+
+// Timeline -------------------------------------------------------------------
+
+export type EventCategory = "promotion" | "incident" | "release" | "holiday" | "pipeline" | "other";
+
+export interface EventNote {
+  id: string;
+  date: string; // YYYY-MM-DD
+  title: string;
+  detail?: string;
+  category: EventCategory;
+  table?: string | null; // null means it applies to every table
+  source: "user" | "stream" | "sample";
+  streamId?: string;
+  createdAt: string;
+}
+
+export interface EventMark {
+  date: string;
+  title: string;
+  category: EventCategory;
+}
+
+export interface TimelineRequest {
+  table: string;
+  dateColumn: string;
+  valueColumn?: string | null;
+  agg: "sum" | "avg" | "count";
+  grain?: Grain | null;
+  where?: string | null;
+}
+
+export interface Anomaly {
+  date: string;
+  value: number;
+  expected: number;
+  change: number;
+  changePct: number | null;
+  score: number;
+  direction: "spike" | "drop";
+}
+
+export interface SegmentAnomaly extends Anomaly {
+  dimension: string;
+  segment: string;
+}
+
+export interface TimelineResult {
+  grain: Grain;
+  label: string;
+  anomalies: Anomaly[];
+  /** Problems inside one segment that the overall number hides. */
+  segments: SegmentAnomaly[];
+  events: EventNote[];
+  warnings: string[];
+}
+
+export interface Movement {
+  dimension: string;
+  segment: string;
+  value: number;
+  baseline: number;
+  change: number;
+  /** The change beyond what this segment would show if it moved in line with the total. */
+  excess: number;
+  share: number | null;
+}
+
+export interface PeriodExplanation {
+  date: string;
+  grain: Grain;
+  label: string;
+  value: number;
+  baseline: number | null;
+  change: number | null;
+  changePct: number | null;
+  comparedWith: string[];
+  movers: Movement[];
+  events: EventNote[];
+}
+
+export type ImpactVerdict = "clear" | "weak" | "none" | "insufficient";
+
+export interface EventImpact {
+  date: string;
+  grain: Grain;
+  window: number;
+  before: number | null;
+  after: number | null;
+  change: number | null;
+  changePct: number | null;
+  placeboShare: number | null;
+  verdict: ImpactVerdict;
+  note: string;
+}
+
+// Streams --------------------------------------------------------------------
+
+export type KafkaSasl = "plain" | "scram-sha-256" | "scram-sha-512";
+
+export interface KafkaConfig {
+  brokers: string[];
+  topic: string;
+  fromBeginning: boolean;
+  ssl: boolean;
+  saslMechanism?: KafkaSasl;
+}
+
+export interface StreamInfo {
+  id: string;
+  name: string;
+  kind: "http" | "kafka";
+  target: "table" | "events";
+  table?: string | null;
+  eventTable?: string | null;
+  dedupeKey?: string | null;
+  status: "active" | "paused" | "error";
+  createdAt: string;
+  lastEventAt?: string;
+  rowsReceived: number;
+  rowsDuplicate: number;
+  rowsRejected: number;
+  cellsRejected: number;
+  lastError?: string;
+  lastRejected?: string[];
+  kafka?: KafkaConfig;
+}
+
+export interface LiveUpdate {
+  stream: string;
+  table: string | null;
+  target: "table" | "events";
+  rows: number;
 }

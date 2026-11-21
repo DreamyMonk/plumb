@@ -1,11 +1,12 @@
 {
-  "name": "sift",
+  "name": "plumb",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p 3000",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3000",
+    "start:network": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "samples": "node scripts/make-samples.mjs"
@@ -14,6 +15,7 @@
     "@anthropic-ai/sdk": "^1.5.0",
     "@duckdb/node-api": "^2.0.0-r.1",
     "geist": "^1.9.1",
+    "kafkajs": "^2.2.4",
     "lucide-react": "^1.68.0",
     "mysql2": "^3.24.6",
     "next": "^16.4.5",
