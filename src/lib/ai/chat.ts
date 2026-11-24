@@ -10,7 +10,8 @@ import type {
 import { createHash } from "node:crypto";
 import { streamUnmasker, type Masker } from "../privacy/masker";
 import { loadPolicy, maskFreeText, newMasker } from "../privacy/policy";
-import { datasets, events, type StoredChat } from "../store";
+import { getLinks } from "../links";
+import { datasets, events, metrics, type StoredChat } from "../store";
 import type { ChatEvent } from "../types";
 import { anthropic, assertUsable, CHAT_BETAS, MODEL } from "./client";
 import { workspaceContext, type Privacy } from "./context";
@@ -27,7 +28,7 @@ Before you start, say in one short line what you are going to check. Close with 
 
 Every number you state comes from a tool result in this conversation. If you have not queried it, query it. If the data cannot answer the question, say what is missing rather than estimating.
 
-Use create_chart when a picture would answer faster than a sentence, and do not repeat a chart's contents in prose: say what it means. When someone asks about the future, use forecast. When someone asks what drives something or wants to predict an outcome, use train_model. When someone asks what happened on a date or why a number moved, use explain_date; to look for unusual periods, use find_anomalies; to test whether an event changed anything, use event_impact. Report the accuracy and warnings those tools return, because the user will act on them. If a forecast or model barely beats its baseline, say so plainly.
+Use create_chart when a picture would answer faster than a sentence, and do not repeat a chart's contents in prose: say what it means. When someone asks about the future, use forecast. When someone asks what drives something or wants to predict an outcome, use train_model. When someone asks what happened on a date or why a number moved, use explain_date; to look for unusual periods, use find_anomalies; to test whether an event changed anything, use event_impact. Saved metrics are the business's agreed definitions: when a question involves one, use query_metric rather than writing your own version. Report the accuracy and warnings those tools return, because the user will act on them. If a forecast or model barely beats its baseline, say so plainly.
 
 Logged events only show what happened around the same time. If an event lines up with a change, say that it lines up, and say when the data can't separate it from other causes.
 
@@ -120,7 +121,7 @@ async function streamStep(messages: BetaMessageParam[], emit: (event: ChatEvent)
 export async function runChatTurn(chat: StoredChat, text: string, emit: (event: ChatEvent) => void, signal: AbortSignal): Promise<void> {
   const list = await datasets.list();
   const privacy: Privacy = { masker: newMasker(chat.masks), policy: await loadPolicy(list) };
-  const context = await workspaceContext(list, await events.list(), privacy);
+  const context = await workspaceContext(list, await events.list(), privacy, await metrics.list(), await getLinks());
   const content: BetaContentBlockParam[] = [];
   if (context.hash !== chat.contextHash) content.push({ type: "text", text: context.text });
   content.push({ type: "text", text: await maskFreeText(privacy.masker, privacy.policy, text) });

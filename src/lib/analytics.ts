@@ -1,6 +1,7 @@
 import "server-only";
 import { ident, query, safeQuery } from "./db";
 import { eventsFor, toMarks } from "./events";
+import { findMetric, metricFillsZero } from "./metrics";
 import { addPeriods, inferGrain, runForecast } from "./ml/forecast";
 import { predictRow, trainForest, type FeatureSpec, type ForestArtifact } from "./ml/forest";
 import { datasets, models, newId } from "./store";
@@ -28,6 +29,32 @@ export interface SeriesRequest {
   agg: "sum" | "avg" | "count";
   grain?: Grain | null;
   where?: string | null;
+  /** A saved metric's name or id. When set, it replaces agg and valueColumn. */
+  metric?: string | null;
+}
+
+export interface Measure {
+  sql: string;
+  label: string;
+  /** Whether a period with no rows counts as zero (sums, counts) or keeps the last value. */
+  zeroWhenEmpty: boolean;
+}
+
+export async function measureFor(request: SeriesRequest, dataset: Dataset): Promise<Measure> {
+  if (request.metric) {
+    const metric = await findMetric(request.metric);
+    if (metric.table !== dataset.id) throw new Error(`${metric.name} is a metric of ${metric.table}, not ${dataset.id}.`);
+    return { sql: `(${metric.expression})`, label: metric.name, zeroWhenEmpty: metricFillsZero(metric) };
+  }
+  if (request.agg === "count") return { sql: "COUNT(*)", label: "Rows", zeroWhenEmpty: true };
+  if (!request.valueColumn) throw new Error("Pick a value column, or use count.");
+  const value = requireColumn(dataset, request.valueColumn);
+  if (value.type !== "integer" && value.type !== "number") throw new Error(`${request.valueColumn} is not numeric.`);
+  return {
+    sql: `${request.agg.toUpperCase()}(${ident(request.valueColumn)})`,
+    label: `${request.agg === "avg" ? "Average" : "Total"} ${request.valueColumn}`,
+    zeroWhenEmpty: request.agg !== "avg",
+  };
 }
 
 export interface ForecastRequest extends SeriesRequest {
@@ -51,13 +78,8 @@ export async function loadSeries(request: SeriesRequest, pickGrain: (dates: stri
   }
   const d = ident(request.dateColumn);
   const table = ident(request.table);
-  let measure = "COUNT(*)";
-  if (request.agg !== "count") {
-    if (!request.valueColumn) throw new Error("Pick a value column, or use count.");
-    const value = requireColumn(dataset, request.valueColumn);
-    if (value.type !== "integer" && value.type !== "number") throw new Error(`${request.valueColumn} is not numeric.`);
-    measure = `${request.agg.toUpperCase()}(${ident(request.valueColumn)})`;
-  }
+  const measured = await measureFor(request, dataset);
+  const measure = measured.sql;
   const filter = request.where ? `AND (${request.where})` : "";
 
   let grain = request.grain ?? null;
@@ -97,16 +119,16 @@ export async function loadSeries(request: SeriesRequest, pickGrain: (dates: stri
   }
   const gaps = values.filter((v) => v === null).length;
   let filled: number[];
-  if (request.agg === "avg") {
+  if (!measured.zeroWhenEmpty) {
     let previous = values.find((v) => v !== null) ?? 0;
     filled = values.map((v) => (previous = v ?? previous));
   } else {
     filled = values.map((v) => v ?? 0); // no rows in a period means a real zero for sums and counts
   }
   if (gaps > 0) {
-    warnings.push(`${gaps} ${grain}${gaps === 1 ? " had" : "s had"} no rows and ${request.agg === "avg" ? "carried the previous value" : "counted as zero"}.`);
+    warnings.push(`${gaps} ${grain}${gaps === 1 ? " had" : "s had"} no rows and ${measured.zeroWhenEmpty ? "counted as zero" : "carried the previous value"}.`);
   }
-  const label = request.agg === "count" ? "Rows" : `${request.agg === "avg" ? "Average" : "Total"} ${request.valueColumn}`;
+  const label = measured.label;
   return { dates, values: filled, grain, label, warnings };
 }
 

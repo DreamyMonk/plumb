@@ -1,4 +1,5 @@
 import { json, route } from "@/lib/api";
+import { requestCheck } from "@/lib/alerts/runner";
 import { ingestTable } from "@/lib/ingest/ingest";
 import { parseFile, type ParsedTable } from "@/lib/ingest/parse";
 import { readSqliteFile } from "@/lib/sources/connectors";
@@ -31,5 +32,6 @@ export const POST = route(async (request) => {
       errors.push({ file: file.name, message: error instanceof Error ? error.message : String(error) });
     }
   }
+  for (const dataset of created) requestCheck(dataset.id);
   return json({ datasets: created, errors });
 });

@@ -411,4 +411,94 @@ export interface LiveUpdate {
   table: string | null;
   target: "table" | "events";
   rows: number;
+  /** Set when an alert fires or clears. Data fields are then empty. */
+  alert?: { id: string; name: string; status: "firing" | "resolved"; message: string };
+}
+
+// Metrics and table links ------------------------------------------------------
+
+export interface Metric {
+  id: string;
+  name: string;
+  description?: string;
+  table: string;
+  /** A SQL aggregate over the table, such as SUM(revenue) FILTER (WHERE NOT returned). */
+  expression: string;
+  format?: ValueFormat;
+  currency?: string;
+  source: "user" | "ai" | "sample";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MetricSuggestion {
+  name: string;
+  description: string;
+  expression: string;
+  format: ValueFormat | null;
+  value: number | null;
+}
+
+export interface TableLink {
+  id: string;
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+  cardinality: "many-to-one" | "one-to-one";
+  /** Share of distinct values in fromColumn that exist in toColumn. */
+  coverage: number;
+  /** Rows in fromTable whose value has no match. */
+  orphans: number;
+  source: "detected" | "user";
+}
+
+// Alerts -----------------------------------------------------------------------
+
+export type AlertKind = "threshold" | "change" | "anomaly" | "stale" | "incident";
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  kind: AlertKind;
+  enabled: boolean;
+  /** threshold, change and anomaly: a saved metric, or a row count of `table`. */
+  metricId?: string | null;
+  table?: string | null;
+  dateColumn?: string | null;
+  grain?: Grain | null;
+  op?: "above" | "below";
+  value?: number | null;
+  changePct?: number | null;
+  direction?: "drop" | "rise" | "any";
+  staleMinutes?: number | null;
+  notifyResolved: boolean;
+  status: "pending" | "ok" | "firing" | "error";
+  message?: string;
+  lastValue?: number | null;
+  lastCheckedAt?: string;
+  lastFiredAt?: string;
+  /** Identifies what fired (a period or event), so the same breach isn't sent twice. */
+  firedKey?: string | null;
+  createdAt: string;
+}
+
+export interface AlertHistoryEntry {
+  id: string;
+  alertId: string;
+  alertName: string;
+  at: string;
+  status: "firing" | "resolved" | "error";
+  message: string;
+  delivery: "sent" | "failed" | "none";
+  deliveryDetail?: string;
+}
+
+export type WebhookFormat = "slack" | "discord" | "json";
+
+export interface NotificationSettingsView {
+  webhookConfigured: boolean;
+  /** Only the host is shown; the full URL works like a password. */
+  webhookHost: string | null;
+  format: WebhookFormat;
 }

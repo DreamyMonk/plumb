@@ -8,7 +8,7 @@ import { ModelResult, WhatIf } from "@/components/ModelCard";
 import { Button, Card, Empty, Field, Note, PageHeader, Select, Spinner, Tabs } from "@/components/ui";
 import { post, useApi } from "@/lib/client";
 import { compact } from "@/lib/format";
-import type { ChartPayload, Dataset, ForecastResult, Grain, ModelSummary } from "@/lib/types";
+import type { ChartPayload, Dataset, ForecastResult, Grain, Metric, ModelSummary } from "@/lib/types";
 
 type Mode = "forecast" | "outcome";
 
@@ -53,7 +53,10 @@ function ForecastPanel({ datasets, initial }: { datasets: Dataset[]; initial: st
   const numbers = useMemo(() => dataset?.columns.filter((c) => isNumber(c.type)) ?? [], [dataset]);
   const [dateColumn, setDateColumn] = useState("");
   const [valueColumn, setValueColumn] = useState("");
-  const [agg, setAgg] = useState<"sum" | "avg" | "count">("sum");
+  // "sum", "avg", "count", or "metric:<id>" for a saved metric.
+  const [agg, setAgg] = useState<string>("sum");
+  const metricId = agg.startsWith("metric:") ? agg.slice("metric:".length) : null;
+  const { data: metricList } = useApi<Metric[]>("/api/metrics");
   const [grain, setGrain] = useState<"" | Grain>("");
   const [horizon, setHorizon] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,7 +76,7 @@ function ForecastPanel({ datasets, initial }: { datasets: Dataset[]; initial: st
     setBusy(true);
     setError(null);
     try {
-      setOutput(await post("/api/predict/forecast", { table, dateColumn, valueColumn: agg === "count" ? null : valueColumn, agg, grain: grain || null, horizon: horizon ? Number(horizon) : null }));
+      setOutput(await post("/api/predict/forecast", { table, dateColumn, valueColumn: agg === "count" || metricId ? null : valueColumn, agg: metricId ? "sum" : agg, metric: metricId, grain: grain || null, horizon: horizon ? Number(horizon) : null }));
     } catch (e) {
       setOutput(null);
       setError(e instanceof Error ? e.message : String(e));
@@ -88,12 +91,12 @@ function ForecastPanel({ datasets, initial }: { datasets: Dataset[]; initial: st
         <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
           <Field label="Table"><Select value={table} onChange={setTable} options={usable.map((d) => ({ value: d.id, label: d.id }))} /></Field>
           <Field label="Date"><Select value={dateColumn} onChange={setDateColumn} options={dates.map((c) => ({ value: c.name, label: c.name }))} /></Field>
-          <Field label="Measure"><Select value={agg} onChange={(v) => setAgg(v as typeof agg)} options={[{ value: "sum", label: "Sum of" }, { value: "avg", label: "Average of" }, { value: "count", label: "Count of rows" }]} /></Field>
-          <Field label="Value"><Select value={valueColumn} disabled={agg === "count"} onChange={setValueColumn} options={numbers.map((c) => ({ value: c.name, label: c.name }))} /></Field>
+          <Field label="Measure"><Select value={agg} onChange={setAgg} options={[{ value: "sum", label: "Sum of" }, { value: "avg", label: "Average of" }, { value: "count", label: "Count of rows" }, ...(metricList ?? []).filter((m) => m.table === table).map((m) => ({ value: `metric:${m.id}`, label: `Metric: ${m.name}` }))]} /></Field>
+          <Field label="Value"><Select value={valueColumn} disabled={agg === "count" || Boolean(metricId)} onChange={setValueColumn} options={numbers.map((c) => ({ value: c.name, label: c.name }))} /></Field>
           <Field label="Period"><Select value={grain} onChange={(v) => setGrain(v as typeof grain)} options={[{ value: "", label: "Auto" }, { value: "day", label: "Day" }, { value: "week", label: "Week" }, { value: "month", label: "Month" }, { value: "quarter", label: "Quarter" }, { value: "year", label: "Year" }]} /></Field>
           <Field label="Periods ahead"><Select value={horizon} onChange={setHorizon} options={[{ value: "", label: "Auto" }, ...[3, 6, 12, 18, 24, 30, 60, 90].map((n) => ({ value: String(n), label: String(n) }))]} /></Field>
         </div>
-        <Button className="mt-3" variant="primary" busy={busy} onClick={() => void run()} disabled={!dateColumn || (agg !== "count" && !valueColumn)}>
+        <Button className="mt-3" variant="primary" busy={busy} onClick={() => void run()} disabled={!dateColumn || (agg !== "count" && !metricId && !valueColumn)}>
           <TrendingUp size={14} /> Forecast
         </Button>
       </Card>

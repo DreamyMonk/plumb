@@ -6,6 +6,7 @@ import { flattenRecord, objectsToRows } from "../ingest/parse";
 import { duckTypeToColType } from "../profile";
 import { datasets, events, newId, streams, type StoredStream } from "../store";
 import type { ColType, EventNote } from "../types";
+import { requestCheck } from "../alerts/runner";
 import { publishUpdate } from "./bus";
 import { withTableLock } from "./lock";
 import { normalizeEpochs, toEvent, type StreamRecord } from "./payload";
@@ -263,6 +264,7 @@ export async function ingestRecords(id: string, records: StreamRecord[], undecod
     stream.lastEventAt = new Date().toISOString();
     await streams.save(stream);
     publishUpdate({ stream: stream.id, table: stream.table ?? null, target: stream.target, rows: result.accepted });
+    requestCheck(stream.target === "events" ? "events" : (stream.table ?? null));
     return result;
   });
 }

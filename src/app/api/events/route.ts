@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { json, route } from "@/lib/api";
+import { requestCheck } from "@/lib/alerts/runner";
 import { events, newId } from "@/lib/store";
 import type { EventNote } from "@/lib/types";
 
@@ -21,5 +22,6 @@ export const POST = route(async (request) => {
   const input = body.parse(await request.json());
   const event: EventNote = { id: newId(), ...input, source: "user", createdAt: new Date().toISOString() };
   await events.save(event);
+  requestCheck("events");
   return json(event);
 });

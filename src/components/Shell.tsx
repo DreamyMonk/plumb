@@ -1,11 +1,11 @@
 "use client";
 
-import { CalendarClock, Database, FileSpreadsheet, KeyRound, LayoutDashboard, LogOut, MessageSquare, Moon, Radio, Sun, TrendingUp } from "lucide-react";
+import { AlertTriangle, Bell, CalendarClock, CheckCircle2, Database, FileSpreadsheet, KeyRound, LayoutDashboard, LogOut, MessageSquare, Moon, Radio, Sigma, Sun, TrendingUp, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useApi, useLiveUpdates } from "@/lib/client";
-import type { Dataset, Status } from "@/lib/types";
+import type { AlertRule, Dataset, LiveUpdate, Status } from "@/lib/types";
 
 const NAV = [
   { href: "/", label: "Data", icon: Database, match: (path: string) => path === "/" || path.startsWith("/data") },
@@ -13,8 +13,32 @@ const NAV = [
   { href: "/dashboards", label: "Dashboards", icon: LayoutDashboard, match: (path: string) => path.startsWith("/dashboards") },
   { href: "/timeline", label: "Timeline", icon: CalendarClock, match: (path: string) => path.startsWith("/timeline") },
   { href: "/predict", label: "Predict", icon: TrendingUp, match: (path: string) => path.startsWith("/predict") },
+  { href: "/metrics", label: "Metrics", icon: Sigma, match: (path: string) => path.startsWith("/metrics") },
+  { href: "/alerts", label: "Alerts", icon: Bell, match: (path: string) => path.startsWith("/alerts") },
   { href: "/streams", label: "Streams", icon: Radio, match: (path: string) => path.startsWith("/streams") },
 ];
+
+const TOAST_MS = 8000;
+
+/** A short notice when an alert fires or clears while the app is open. */
+function AlertToast({ alert, onClose }: { alert: NonNullable<LiveUpdate["alert"]>; onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [alert, onClose]);
+  const firing = alert.status === "firing";
+  const Icon = firing ? AlertTriangle : CheckCircle2;
+  return (
+    <div role="status" className="fixed z-50 bottom-4 right-4 left-4 sm:left-auto sm:w-96 rounded-xl border border-line bg-surface shadow-lg p-3.5 flex gap-2.5 rise">
+      <Icon size={17} className={`mt-0.5 shrink-0 ${firing ? "text-bad" : "text-good"}`} aria-hidden />
+      <Link href="/alerts" onClick={onClose} className="min-w-0 flex-1">
+        <p className="font-medium text-[13.5px]">{firing ? "Alert" : "Cleared"}: {alert.name}</p>
+        <p className="text-[12.5px] text-ink-2 line-clamp-3">{alert.message}</p>
+      </Link>
+      <button type="button" aria-label="Dismiss" onClick={onClose} className="shrink-0 text-ink-3 hover:text-ink cursor-pointer"><X size={14} /></button>
+    </div>
+  );
+}
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
@@ -60,6 +84,9 @@ export function Shell({ children }: { children: ReactNode }) {
 function AppShell({ children, pathname }: { children: ReactNode; pathname: string }) {
   const { data: status } = useApi<Status>("/api/status");
   const { data: datasets, refresh } = useApi<Dataset[]>("/api/datasets");
+  const { data: rules, refresh: refreshRules } = useApi<AlertRule[]>("/api/alerts");
+  const [toast, setToast] = useState<LiveUpdate["alert"] | null>(null);
+  const firing = rules?.filter((r) => r.enabled && r.status === "firing").length ?? 0;
 
   const known = useRef(new Set<string>());
   useEffect(() => {
@@ -67,6 +94,10 @@ function AppShell({ children, pathname }: { children: ReactNode; pathname: strin
   }, [datasets]);
   useLiveUpdates((update) => {
     if (update.table && !known.current.has(update.table)) void refresh();
+    if (update.alert) {
+      setToast(update.alert);
+      void refreshRules();
+    }
   });
 
   useEffect(() => {
@@ -78,7 +109,7 @@ function AppShell({ children, pathname }: { children: ReactNode; pathname: strin
   return (
     <div className="min-h-full md:flex">
       <aside className="md:w-56 md:shrink-0 md:h-screen md:sticky md:top-0 bg-surface border-b md:border-b-0 md:border-r border-line flex md:flex-col">
-        <div className="flex items-center gap-2 px-4 h-14 shrink-0">
+        <div className="flex items-center gap-2 px-4 max-sm:px-2 h-14 shrink-0">
           <span className="grid place-items-center size-6 rounded-md bg-accent text-on-accent font-semibold text-[13px]" aria-hidden>
             P
           </span>
@@ -92,11 +123,16 @@ function AppShell({ children, pathname }: { children: ReactNode; pathname: strin
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
-                aria-label={label}
-                className={`flex items-center gap-2 rounded-lg px-2.5 h-9 font-medium text-[13.5px] whitespace-nowrap ${active ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
+                aria-label={href === "/alerts" && firing ? `${label}, ${firing} firing` : label}
+                className={`relative flex items-center gap-2 rounded-lg px-2.5 max-sm:px-1.5 h-9 font-medium text-[13.5px] whitespace-nowrap ${active ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
               >
                 <Icon size={16} aria-hidden />
                 <span className="max-sm:hidden">{label}</span>
+                {href === "/alerts" && firing ? (
+                  <span className="md:ml-auto max-md:absolute max-md:-top-0.5 max-md:-right-0.5 min-w-4 h-4 px-1 rounded-full bg-bad text-white text-[10.5px] font-semibold grid place-items-center tnum" aria-hidden>
+                    {firing}
+                  </span>
+                ) : null}
               </Link>
             );
           })}
@@ -119,7 +155,7 @@ function AppShell({ children, pathname }: { children: ReactNode; pathname: strin
           </div>
         </div>
 
-        <div className="ml-auto md:ml-0 flex items-center gap-1 px-3 md:h-12 md:border-t border-line shrink-0">
+        <div className="ml-auto md:ml-0 flex items-center gap-1 px-3 max-sm:px-1 md:h-12 md:border-t border-line shrink-0">
           {status && !status.aiConfigured ? (
             <span title="Add ANTHROPIC_API_KEY to .env.local to use chat, dashboards and AI review." className="flex items-center gap-1 text-[12px] text-warn truncate">
               <KeyRound size={13} aria-hidden /> <span className="max-md:hidden">No API key</span>
@@ -134,6 +170,7 @@ function AppShell({ children, pathname }: { children: ReactNode; pathname: strin
         </div>
       </aside>
       <main className="flex-1 min-w-0">{children}</main>
+      {toast ? <AlertToast alert={toast} onClose={() => setToast(null)} /> : null}
     </div>
   );
 }

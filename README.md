@@ -59,6 +59,10 @@ Judgment calls, like filling missing values or removing outliers, are only sugge
 
 **Streams.** Send live data from your pipelines. Each stream gets a secure endpoint, with setup snippets for curl, Python, Airflow, Spark, Kafka Connect, Vector, dbt Cloud and Fivetran. Plumb can also read a Kafka topic directly. Rows land in a table, new fields become new columns, and open dashboards update by themselves. Pipeline events, such as a failed dbt or Airflow run, can land on the Timeline instead.
 
+**Metrics.** Define a number once, such as net revenue as `SUM(revenue) FILTER (WHERE NOT returned)`, and the AI, dashboards, forecasts, the Timeline and alerts all use that definition. A metric must work out to one number for the whole table, and it runs through the same read-only checks as any other query. The AI can suggest metrics, and each suggestion runs against your data before you see it. Plumb also finds links between tables, such as `orders.customer_id` to `customers.customer_id`, and shows how many rows have no match. The AI joins tables only along these links, so you can ask for net revenue by plan, a column of the customers table.
+
+**Alerts.** Get told when a metric drops or rises by a percentage, passes a limit, or has an unusual period, when a table stops receiving data, or when an incident is logged. Rules are checked whenever data arrives and on a timer. Unfinished periods are ignored, so today's half-day never looks like a crash, and daily numbers are compared with the same weekday a week earlier. Each problem is reported once, again only if a new period breaks the rule, and once more when it clears. Alerts appear in the app and can also go to Slack, Discord or any webhook. Those messages contain metric names, numbers and dates only, never rows of data.
+
 **Predict.** Forecasts compare several methods by backtest on your own data and report accuracy against a simple baseline. Outcome models are random forests evaluated on held-out rows, with what-if scoring. All of this math runs locally, so the accuracy figures come from your data, not from the language model.
 
 ## Data and privacy

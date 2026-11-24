@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { json, route } from "@/lib/api";
+import { requestCheck } from "@/lib/alerts/runner";
 import { ingestTable } from "@/lib/ingest/ingest";
 import { parseFile } from "@/lib/ingest/parse";
-import { events, newId } from "@/lib/store";
-import type { Dataset, EventNote } from "@/lib/types";
+import { events, metrics, newId } from "@/lib/store";
+import type { Dataset, EventNote, Metric } from "@/lib/types";
 
 const SAMPLES = ["retail_orders.csv", "customers.csv"];
 
@@ -30,5 +31,17 @@ export const POST = route(async () => {
     if (existing.some((e) => e.date === event.date && e.title === event.title)) continue;
     await events.save({ ...event, id: newId(), table, source: "sample", createdAt: new Date().toISOString() });
   }
+  const customers = created.find((d) => d.label === "customers")?.id ?? "customers";
+  const sampleMetrics: Pick<Metric, "name" | "description" | "table" | "expression" | "format" | "currency">[] = [
+    { name: "Net revenue", description: "Revenue from orders that weren't returned", table, expression: "SUM(revenue) FILTER (WHERE NOT returned)", format: "currency", currency: "$" },
+    { name: "Churn rate", description: "Share of customers who left", table: customers, expression: "AVG(CASE WHEN churned THEN 100.0 ELSE 0 END)", format: "percent" },
+  ];
+  const existingMetrics = await metrics.list();
+  for (const metric of sampleMetrics) {
+    if (existingMetrics.some((m) => m.name === metric.name)) continue;
+    const now = new Date().toISOString();
+    await metrics.save({ ...metric, id: newId(), source: "sample", createdAt: now, updatedAt: now });
+  }
+  for (const dataset of created) requestCheck(dataset.id);
   return json({ datasets: created, errors: [] });
 });

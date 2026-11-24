@@ -4,10 +4,11 @@ import { buildChart } from "../charts";
 import { ident, safeQuery } from "../db";
 import type { Masker } from "../privacy/masker";
 import { loadPolicy, maskData, maskFreeText, newMasker } from "../privacy/policy";
-import { dashboards, datasets, events, newId } from "../store";
+import { getLinks } from "../links";
+import { dashboards, datasets, events, metrics, newId } from "../store";
 import type { ChartPayload, ChartSpec, Dashboard, Dataset, Widget } from "../types";
 import { structured } from "./client";
-import { describeEvents, describeTable, type Privacy } from "./context";
+import { describeEvents, describeModel, describeTable, type Privacy } from "./context";
 import { summarizeResult } from "./result-summary";
 import { chartSchema, toSpec } from "./tools";
 
@@ -61,7 +62,8 @@ async function sampleRows(dataset: Dataset, privacy: Privacy): Promise<string> {
 
 async function tablePrompt(tables: Dataset[], privacy: Privacy): Promise<string> {
   const parts = await Promise.all(tables.map(async (d) => `${await describeTable(d, privacy)}\nSample rows: ${await sampleRows(d, privacy)}`));
-  return parts.join("\n\n");
+  const model = await describeModel(await metrics.list(), await getLinks(), privacy, new Set(tables.map((d) => d.id)));
+  return [...parts, ...(model ? [`${model}\nFor a saved metric, use its exact expression in your SQL.`] : [])].join("\n\n");
 }
 
 type Draft = z.infer<typeof widgetSchema>;

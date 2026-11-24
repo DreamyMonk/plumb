@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DATA_DIR } from "./db";
-import type { Dashboard, Dataset, EventNote, ModelSummary, StreamInfo, UiMessage } from "./types";
+import type { AlertHistoryEntry, AlertRule, Dashboard, Dataset, EventNote, Metric, ModelSummary, StreamInfo, TableLink, UiMessage, WebhookFormat } from "./types";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 
 export const newId = () => randomUUID().slice(0, 8);
@@ -87,7 +87,27 @@ export interface StoredStream extends StreamInfo {
   tokenHash: string;
 }
 
+/** Detected links are cached until tables change; the user's choices are kept apart. */
+export interface StoredLinks {
+  id: "links";
+  signature: string;
+  detected: TableLink[];
+  dismissed: string[];
+  manual: TableLink[];
+}
+
+export interface StoredNotifications {
+  id: "notifications";
+  webhookUrl?: string;
+  format: WebhookFormat;
+}
+
 export const datasets = collection<Dataset>("datasets");
+export const metrics = collection<Metric>("metrics");
+export const alerts = collection<AlertRule>("alerts");
+export const alertHistory = collection<AlertHistoryEntry>("alert-history");
+export const links = collection<StoredLinks>("settings");
+export const notifications = collection<StoredNotifications>("settings");
 export const events = collection<EventNote>("events");
 export const streams = collection<StoredStream>("streams");
 export const dashboards = collection<Dashboard>("dashboards");

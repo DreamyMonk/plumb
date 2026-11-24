@@ -7,6 +7,7 @@ const body = z.object({
   dateColumn: z.string(),
   valueColumn: z.string().nullish(),
   agg: z.enum(["sum", "avg", "count"]),
+  metric: z.string().nullish(),
   grain: z.enum(["day", "week", "month", "quarter", "year"]).nullish(),
   horizon: z.number().int().positive().nullish(),
 });

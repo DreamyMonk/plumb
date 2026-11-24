@@ -7,7 +7,7 @@ import { ChartCard } from "@/components/charts/ChartCard";
 import { Badge, Button, Card, Empty, Field, inputClass, Note, PageHeader, Select, Spinner } from "@/components/ui";
 import { api, post, useApi } from "@/lib/client";
 import { compact, exactValue, formatTick, humanize } from "@/lib/format";
-import type { Anomaly, ChartPayload, Dataset, EventCategory, EventImpact, EventNote, Grain, PeriodExplanation, SegmentAnomaly, TimelineResult } from "@/lib/types";
+import type { Anomaly, ChartPayload, Dataset, EventCategory, EventImpact, EventNote, Grain, Metric, PeriodExplanation, SegmentAnomaly, TimelineResult } from "@/lib/types";
 
 const CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "promotion", label: "Promotion" },
@@ -34,12 +34,13 @@ interface Query {
   dateColumn: string;
   valueColumn: string | null;
   agg: "sum" | "avg" | "count";
+  metric: string | null;
   grain: Grain | null;
 }
 
 function Explanation({ query, result }: { query: Query; result: PeriodExplanation }) {
   const widest = Math.max(...result.movers.map((m) => Math.abs(m.change)), 1);
-  const ask = `What happened to ${query.valueColumn ?? "rows"} in ${query.table} on ${result.date}?`;
+  const ask = `What happened to ${result.label.toLowerCase()} in ${query.table} on ${result.date}?`;
   return (
     <Card className="p-4 rise">
       <div className="flex items-start justify-between gap-3">
@@ -190,6 +191,7 @@ function AnomalyRow({ anomaly, active, onPick }: { anomaly: Anomaly | SegmentAno
 export default function TimelinePage() {
   const { data: datasets, error: loadError } = useApi<Dataset[]>("/api/datasets");
   const { data: events, refresh: refreshEvents } = useApi<EventNote[]>("/api/events");
+  const { data: metricList } = useApi<Metric[]>("/api/metrics");
   const usable = useMemo(() => (datasets ?? []).filter((d) => d.columns.some((c) => isDate(c.type))), [datasets]);
 
   const [table, setTable] = useState("");
@@ -198,7 +200,9 @@ export default function TimelinePage() {
   const numbers = useMemo(() => dataset?.columns.filter((c) => isNumber(c.type)) ?? [], [dataset]);
   const [dateColumn, setDateColumn] = useState("");
   const [valueColumn, setValueColumn] = useState("");
-  const [agg, setAgg] = useState<Query["agg"]>("sum");
+  // "sum", "avg", "count", or "metric:<id>" for a saved metric.
+  const [agg, setAgg] = useState<string>("sum");
+  const metricId = agg.startsWith("metric:") ? agg.slice("metric:".length) : null;
   const [grain, setGrain] = useState<"" | Grain>("");
   const [output, setOutput] = useState<{ result: TimelineResult; chart: ChartPayload } | null>(null);
   const [ran, setRan] = useState<Query | null>(null);
@@ -220,7 +224,17 @@ export default function TimelinePage() {
     setAgg(preferred ? "sum" : "count");
   }, [dates, numbers]);
 
-  const currentQuery = useCallback((): Query => ({ table, dateColumn, valueColumn: agg === "count" ? null : valueColumn, agg, grain: grain || null }), [table, dateColumn, valueColumn, agg, grain]);
+  const currentQuery = useCallback(
+    (): Query => ({
+      table,
+      dateColumn,
+      valueColumn: agg === "count" || metricId ? null : valueColumn,
+      agg: metricId ? "sum" : (agg as Query["agg"]),
+      metric: metricId,
+      grain: grain || null,
+    }),
+    [table, dateColumn, valueColumn, agg, metricId, grain],
+  );
 
   const run = useCallback(async () => {
     const query = currentQuery();
@@ -271,11 +285,11 @@ export default function TimelinePage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
               <Field label="Table"><Select value={table} onChange={setTable} options={usable.map((d) => ({ value: d.id, label: d.id }))} /></Field>
               <Field label="Date"><Select value={dateColumn} onChange={setDateColumn} options={dates.map((c) => ({ value: c.name, label: c.name }))} /></Field>
-              <Field label="Measure"><Select value={agg} onChange={(v) => setAgg(v as Query["agg"])} options={[{ value: "sum", label: "Sum of" }, { value: "avg", label: "Average of" }, { value: "count", label: "Count of rows" }]} /></Field>
-              <Field label="Value"><Select value={valueColumn} disabled={agg === "count"} onChange={setValueColumn} options={numbers.map((c) => ({ value: c.name, label: c.name }))} /></Field>
+              <Field label="Measure"><Select value={agg} onChange={setAgg} options={[{ value: "sum", label: "Sum of" }, { value: "avg", label: "Average of" }, { value: "count", label: "Count of rows" }, ...(metricList ?? []).filter((m) => m.table === table).map((m) => ({ value: `metric:${m.id}`, label: `Metric: ${m.name}` }))]} /></Field>
+              <Field label="Value"><Select value={valueColumn} disabled={agg === "count" || Boolean(metricId)} onChange={setValueColumn} options={numbers.map((c) => ({ value: c.name, label: c.name }))} /></Field>
               <Field label="Period"><Select value={grain} onChange={(v) => setGrain(v as typeof grain)} options={[{ value: "", label: "Auto" }, { value: "day", label: "Day" }, { value: "week", label: "Week" }, { value: "month", label: "Month" }, { value: "quarter", label: "Quarter" }]} /></Field>
             </div>
-            <Button className="mt-3" variant="primary" busy={busy} disabled={!dateColumn || (agg !== "count" && !valueColumn)} onClick={() => void run()}>
+            <Button className="mt-3" variant="primary" busy={busy} disabled={!dateColumn || (agg !== "count" && !metricId && !valueColumn)} onClick={() => void run()}>
               <Sparkles size={14} /> Find what happened
             </Button>
           </Card>

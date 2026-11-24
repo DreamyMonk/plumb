@@ -3,6 +3,7 @@ import { json, route } from "@/lib/api";
 import { applyTransform, undoTransform } from "@/lib/ingest/ingest";
 import { datasets } from "@/lib/store";
 import { withTableLock } from "@/lib/streams/lock";
+import { requestCheck } from "@/lib/alerts/runner";
 import type { TransformOp } from "@/lib/types";
 
 type Context = { params: Promise<{ id: string }> };
@@ -26,5 +27,6 @@ export const POST = route<Context>(async (request, { params }) => {
     if (!dataset) return null;
     return "undo" in input ? undoTransform(dataset) : applyTransform(dataset, input.transform as TransformOp);
   });
+  if (next) requestCheck(id);
   return next ? json(next) : json({ error: "Dataset not found." }, 404);
 });

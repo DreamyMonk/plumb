@@ -1,5 +1,5 @@
 import "server-only";
-import { loadSeries, requireDataset, type LoadedSeries, type SeriesRequest } from "./analytics";
+import { loadSeries, measureFor, requireDataset, type LoadedSeries, type SeriesRequest } from "./analytics";
 import { ident, literal, safeQuery } from "./db";
 import { eventsFor, toMarks } from "./events";
 import { chanceOfSoFew, detectAnomalies, eventImpact, median } from "./ml/anomaly";
@@ -26,7 +26,6 @@ const VOLUME_CONTEXT_PERIODS = 28;
 
 const DAY_MS = 86_400_000;
 
-const measureSql = (request: SeriesRequest) => (request.agg === "count" ? "COUNT(*)" : `${request.agg.toUpperCase()}(${ident(request.valueColumn ?? "")})`);
 
 function categoryColumns(dataset: Dataset, limit: number, maxDistinct: number): ColumnProfile[] {
   return dataset.columns.filter((c) => (c.type === "text" || c.type === "boolean") && c.distinct >= 2 && c.distinct <= maxDistinct && c.nullPct < 0.9).slice(0, limit);
@@ -37,8 +36,9 @@ function categoryColumns(dataset: Dataset, limit: number, maxDistinct: number): 
  * in the company total, but stands out against that region's own history.
  */
 async function scanSegments(request: SeriesRequest, series: LoadedSeries, overall: Set<string>): Promise<SegmentAnomaly[]> {
-  if (request.agg === "avg") return []; // an average has no "missing rows means zero"
   const dataset = await requireDataset(request.table);
+  const measure = await measureFor(request, dataset);
+  if (!measure.zeroWhenEmpty) return []; // an average or ratio has no "missing rows means zero"
   const d = ident(request.dateColumn);
   const filter = request.where ? `AND (${request.where})` : "";
   const position = new Map(series.dates.map((date, i) => [date, i]));
@@ -48,7 +48,7 @@ async function scanSegments(request: SeriesRequest, series: LoadedSeries, overal
   for (const column of categoryColumns(dataset, MAX_SCAN_DIMENSIONS, MAX_SCAN_SEGMENTS)) {
     const c = ident(column.name);
     const data = await safeQuery(
-      `SELECT ${c}::VARCHAR AS segment, CAST(date_trunc('${series.grain}', ${d}) AS DATE)::VARCHAR AS period, ${measureSql(request)} AS value, COUNT(*) AS row_count
+      `SELECT ${c}::VARCHAR AS segment, CAST(date_trunc('${series.grain}', ${d}) AS DATE)::VARCHAR AS period, ${measure.sql} AS value, COUNT(*) AS row_count
        FROM ${ident(request.table)} WHERE ${d} IS NOT NULL AND ${c} IS NOT NULL ${filter} GROUP BY 1, 2`,
       200_000,
     );
@@ -159,7 +159,7 @@ export async function explainPeriod(request: ExplainRequest): Promise<PeriodExpl
     const d = ident(request.dateColumn);
     const table = ident(request.table);
     const filter = request.where ? `AND (${request.where})` : "";
-    const measure = measureSql(request);
+    const { sql: measure } = await measureFor(request, dataset);
     const periodList = [period, ...comparison].map((date) => `DATE ${literal(date)}`).join(", ");
     const dimensions = categoryColumns(dataset, MAX_DIMENSIONS, 30);
     const overall = baseline ? change / baseline : 0;

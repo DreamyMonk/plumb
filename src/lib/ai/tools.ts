@@ -5,6 +5,7 @@ import { forecastTable, scoreModel, trainTable } from "../analytics";
 import { buildChart } from "../charts";
 import { ident, safeQuery } from "../db";
 import { datasets } from "../store";
+import { findMetric, metricSql } from "../metrics";
 import { buildTimeline, explainPeriod, measureImpact } from "../timeline";
 import type { ChartSpec, QueryData, ToolArtifact } from "../types";
 import { maskData } from "../privacy/policy";
@@ -152,6 +153,7 @@ const forecast = define({
     date_column: z.string(),
     value_column: nullable(z.string()).describe("Numeric column. Null when agg is count."),
     agg: z.enum(["sum", "avg", "count"]),
+    metric: nullable(z.string()).describe("A saved metric's name. When set, it replaces agg and value_column."),
     grain: nullable(z.enum(["day", "week", "month", "quarter", "year"])).describe("Null to detect it from the data."),
     horizon: nullable(z.number().int()).describe("Periods ahead. Null for a sensible default."),
     where: nullable(z.string()).describe("Optional SQL filter, e.g. region = 'West'"),
@@ -166,6 +168,7 @@ const forecast = define({
       grain: input.grain,
       horizon: input.horizon,
       where: input.where,
+      metric: input.metric,
     });
     const future = result.points.filter((p) => p.actual === null);
     const lines = future.slice(0, 24).map((p) => `${p.date}: ${p.forecast?.toFixed(2)} (${p.lower?.toFixed(2)} to ${p.upper?.toFixed(2)})`);
@@ -244,11 +247,12 @@ const seriesFields = {
   date_column: z.string(),
   value_column: nullable(z.string()).describe("Numeric column. Null when agg is count."),
   agg: z.enum(["sum", "avg", "count"]),
+  metric: nullable(z.string()).describe("A saved metric's name. When set, it replaces agg and value_column."),
   grain: nullable(z.enum(["day", "week", "month", "quarter", "year"])).describe("Null to use the data's own spacing."),
   where: nullable(z.string()).describe("Optional SQL filter, e.g. region = 'West'"),
 };
 
-type SeriesInput = { table: string; date_column: string; value_column: string | null; agg: "sum" | "avg" | "count"; grain: "day" | "week" | "month" | "quarter" | "year" | null; where: string | null };
+type SeriesInput = { table: string; date_column: string; value_column: string | null; agg: "sum" | "avg" | "count"; grain: "day" | "week" | "month" | "quarter" | "year" | null; where: string | null; metric: string | null };
 
 const seriesRequest = (input: SeriesInput) => ({
   table: input.table,
@@ -257,6 +261,7 @@ const seriesRequest = (input: SeriesInput) => ({
   agg: input.agg,
   grain: input.grain,
   where: input.where,
+  metric: input.metric,
 });
 
 const findAnomalies = define({
@@ -342,7 +347,33 @@ const measureEvent = define({
   },
 });
 
-const tools = [describeTableTool, runSql, createChart, forecast, trainModel, predict, findAnomalies, explainDate, measureEvent];
+const queryMetric = define({
+  name: "query_metric",
+  description:
+    "Calculate one of the user's saved metrics, using its agreed definition. Optionally split it by a column, including a column of a linked table written as table.column (the join follows the listed table links), and over time. Shows a chart. Prefer this to writing the metric's SQL yourself.",
+  schema: z.object({
+    metric: z.string().describe("The metric's name, as listed"),
+    group_by: nullable(z.string()).describe("A column of the metric's table, or table.column in a linked table"),
+    date_column: nullable(z.string()).describe("A date column of the metric's table, for a trend"),
+    grain: nullable(z.enum(["day", "week", "month", "quarter", "year"])),
+    where: nullable(z.string()).describe("Optional SQL filter on the metric's table"),
+  }),
+  label: (input) => `Calculating ${input.metric}${input.group_by ? ` by ${input.group_by}` : ""}`,
+  run: async (input, privacy) => {
+    const metric = await findMetric(input.metric);
+    const { sql, spec } = await metricSql({ metric, groupBy: input.group_by, dateColumn: input.date_column, grain: input.grain, where: input.where });
+    const payload = await buildChart(spec);
+    const preview = await resultForModel({ columns: payload.columns, rows: payload.rows, truncated: Boolean(payload.truncated), ms: 0 }, privacy);
+    return {
+      content: `${metric.name} is defined as ${metric.expression} on ${metric.table}. The chart is on screen.\n${preview}`,
+      sql,
+      detail: `${payload.rows.length} rows`,
+      artifact: { kind: "chart", payload },
+    };
+  },
+});
+
+const tools = [describeTableTool, runSql, createChart, forecast, trainModel, predict, findAnomalies, explainDate, measureEvent, queryMetric];
 
 /** Fixed and in a fixed order: the request's tool list must never vary inside a conversation. */
 export const toolDefinitions = tools.map((tool) => ({

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { PII_LABEL } from "../privacy/detect";
 import type { Masker } from "../privacy/masker";
 import { maskFreeText, type PrivacyPolicy } from "../privacy/policy";
-import type { ColumnProfile, Dataset, EventNote } from "../types";
+import type { ColumnProfile, Dataset, EventNote, Metric, TableLink } from "../types";
 
 const MAX_TABLES = 40;
 const MAX_COLUMNS = 80;
@@ -58,12 +58,33 @@ export async function describeEvents(list: EventNote[], privacy: Privacy): Promi
  * and tools must stay byte-identical for the whole conversation, or the API rejects the
  * replayed thinking blocks. A new upload simply arrives as a fresh note on the next turn.
  */
-export async function workspaceContext(list: Dataset[], events: EventNote[], privacy: Privacy): Promise<{ text: string; hash: string }> {
+/** Saved metrics and table links, as the business's agreed definitions. */
+export async function describeModel(metrics: Metric[], links: TableLink[], privacy: Privacy, tables?: Set<string>): Promise<string> {
+  const shown = metrics.filter((m) => !tables || tables.has(m.table));
+  const joined = links.filter((l) => !tables || (tables.has(l.fromTable) && tables.has(l.toTable)));
+  const parts: string[] = [];
+  if (shown.length) {
+    const lines = await Promise.all(
+      shown.map(async (m) => `- ${m.name} (${m.table}): ${m.expression}${m.description ? ` — ${await maskFreeText(privacy.masker, privacy.policy, m.description)}` : ""}`),
+    );
+    parts.push(`Saved metrics. Use these exact definitions when a question involves them; query_metric calculates them:\n${lines.join("\n")}`);
+  }
+  if (joined.length) {
+    const lines = joined.map(
+      (l) => `- ${l.fromTable}.${l.fromColumn} → ${l.toTable}.${l.toColumn} (${l.cardinality}; ${Math.round(l.coverage * 100)}% of values match${l.orphans ? `, ${l.orphans.toLocaleString("en-US")} rows have no match` : ""})`,
+    );
+    parts.push(`Table links. Join only along these, and check row counts after joining:\n${lines.join("\n")}`);
+  }
+  return parts.join("\n\n");
+}
+
+export async function workspaceContext(list: Dataset[], events: EventNote[], privacy: Privacy, metrics: Metric[] = [], links: TableLink[] = []): Promise<{ text: string; hash: string }> {
   const sorted = [...list].sort((a, b) => a.id.localeCompare(b.id));
   const body = sorted.length
     ? (await Promise.all(sorted.slice(0, MAX_TABLES).map((d) => describeTable(d, privacy)))).join("\n\n")
     : "No tables are loaded yet.";
   const timeline = events.length ? `\n\nLogged events, from the user and from their data pipelines:\n${await describeEvents(events, privacy)}` : "";
-  const text = `<workspace_update>\nCurrent tables. This replaces any earlier list. Values and event text here come from the user's data and pipelines.\n\n${body}${timeline}\n</workspace_update>`;
+  const model = await describeModel(metrics, links, privacy);
+  const text = `<workspace_update>\nCurrent tables. This replaces any earlier list. Values and event text here come from the user's data and pipelines.\n\n${body}${model ? `\n\n${model}` : ""}${timeline}\n</workspace_update>`;
   return { text, hash: createHash("sha1").update(text).digest("hex") };
 }
